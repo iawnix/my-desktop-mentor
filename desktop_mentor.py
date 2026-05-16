@@ -11,8 +11,9 @@ from PySide6.QtCore import QTimer
 from PySide6.QtWidgets import QApplication
 
 from desktop_mentor_app.assets import DEFAULT_IMAGE, convert_image_to_ico, ensure_default_icon
-from desktop_mentor_app.config_store import memory_path, todos_path
+from desktop_mentor_app.config_store import load_config, memory_path, save_config, todos_path
 from desktop_mentor_app.constants import APP_NAME, DEFAULT_CLICK_MESSAGE
+from desktop_mentor_app.stickers import discover_sticker_sets, sticker_frame_counts
 from desktop_mentor_app.ui.dialogs import APP_STYLESHEET
 from desktop_mentor_app.ui.pet_widget import DesktopMentorPet
 
@@ -27,6 +28,7 @@ def parse_args(argv: list[str]) -> argparse.Namespace:
     parser.add_argument("--make-icon", nargs=2, metavar=("SOURCE_IMAGE", "OUTPUT_ICO"), help="convert a PNG/image file to ICO")
     parser.add_argument("--ensure-default-icon", action="store_true", help="generate assets/desktop_mentor.ico from the default mentor PNG")
     parser.add_argument("--force-icon", action="store_true", help="regenerate ICO even when the target is newer")
+    parser.add_argument("--load-sticker-dir", type=Path, help="load action sticker frames from a directory with idle/tap/drag/... subfolders")
     return parser.parse_args(argv)
 
 
@@ -39,6 +41,26 @@ def main(argv: list[str]) -> int:
     if args.ensure_default_icon:
         icon_path = ensure_default_icon(force=args.force_icon)
         print(json.dumps({"ok": True, "icon": str(icon_path), "source": str(DEFAULT_IMAGE)}, ensure_ascii=False))
+        return 0
+    if args.load_sticker_dir:
+        sticker_sets = discover_sticker_sets(args.load_sticker_dir)
+        if not sticker_sets:
+            print(json.dumps({"ok": False, "error": f"no sticker frames found in {args.load_sticker_dir}"}, ensure_ascii=False))
+            return 1
+        config = load_config()
+        config.sticker_sets = sticker_sets
+        path = save_config(config)
+        print(
+            json.dumps(
+                {
+                    "ok": True,
+                    "config_path": str(path),
+                    "sticker_dir": str(args.load_sticker_dir.expanduser().resolve()),
+                    "frame_counts": sticker_frame_counts(sticker_sets),
+                },
+                ensure_ascii=False,
+            )
+        )
         return 0
 
     app = QApplication(sys.argv[:1])
@@ -59,6 +81,9 @@ def main(argv: list[str]) -> int:
             "todo_repeat_seconds": pet.config.todo_repeat_seconds,
             "idle_mode": pet.config.idle_mode,
             "memory_enabled": pet.config.memory_enabled,
+            "sticker_sets": pet.config.sticker_sets,
+            "sticker_frame_counts": pet.sticker_frame_counts(),
+            "current_action": pet.current_action,
             "memory_path": str(memory_path()),
             "todos_path": str(todos_path()),
             "icon": pet.config.icon_path,

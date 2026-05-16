@@ -40,6 +40,7 @@ from ..constants import (
     DRAG_RELEASE_EFFECT_DURATION,
     DROP_EFFECT_DURATION,
     DROP_HOTZONE_PAD,
+    FULLSCREEN_ALERT_DURATION_MS,
     IDLE_CHECK_INTERVAL_MS,
     IDLE_MODE_FULLSCREEN,
     MAX_BUBBLE_TEXT_CHARS,
@@ -48,6 +49,16 @@ from ..constants import (
     MIN_IDLE_SECONDS,
     MIN_MESSAGE_SECONDS,
     MIN_TODO_REPEAT_SECONDS,
+    STICKER_ACTION_ALERT,
+    STICKER_ACTION_DRAG,
+    STICKER_ACTION_DROP_FILE,
+    STICKER_ACTION_ERROR,
+    STICKER_ACTION_IDLE,
+    STICKER_ACTION_SPEAKING,
+    STICKER_ACTION_TAP,
+    STICKER_ACTION_THINKING,
+    STICKER_ACTIONS,
+    STICKER_FRAME_INTERVAL_MS,
     TODO_CHECK_INTERVAL_MS,
     TODO_BUBBLE_GAP,
     TODO_BUBBLE_MAX_HEIGHT,
@@ -62,12 +73,14 @@ from ..constants import (
 )
 from ..drop_context import collect_drop_context, compose_prompt_with_drop_context
 from ..idle_detector import system_idle_seconds
+from ..stickers import normalize_sticker_sets
 from ..todo_store import due_todos, future_todos, load_todos, remove_todos_by_ids, rescheduled_todo, save_todos
 from .dialogs import ChatDialog, FullScreenIdleAlert, SettingsDialog, TextViewDialog, TodoDialog, prepare_modern_menu
 
 
 class AgentSignals(QObject):
     reply_ready = Signal(str)
+    error_ready = Signal(str)
 
 
 def as_global_pos(widget: QWidget, event_or_point: object) -> QPoint:
@@ -157,6 +170,12 @@ class DesktopMentorPet(QWidget):
             self.image_path = image_path
             self.pixmap = fallback_pixmap
             self.config.image_path = str(image_path)
+        self.sticker_frames: dict[str, list[QPixmap]] = {}
+        self.current_action = STICKER_ACTION_IDLE
+        self.action_until = 0.0
+        self.action_loop = True
+        self.frame_index = 0
+        self.last_frame_at = time.monotonic()
         self.fullscreen_alert: FullScreenIdleAlert | None = None
         self.icon_error = self.refresh_window_icon()
 
@@ -184,10 +203,12 @@ class DesktopMentorPet(QWidget):
         self.hovering = False
         self.agent_signals = AgentSignals()
         self.agent_signals.reply_ready.connect(self.show_agent_reply)
+        self.agent_signals.error_ready.connect(self.show_agent_error)
 
         self.pulse_timer = QTimer(self)
         self.pulse_timer.setInterval(16)
         self.pulse_timer.timeout.connect(self.animation_tick)
+        self.reload_sticker_sets()
         self.drag_follow_timer = QTimer(self)
         self.drag_follow_timer.setInterval(16)
         self.drag_follow_timer.timeout.connect(self.follow_drag_pointer)
@@ -225,6 +246,86 @@ class DesktopMentorPet(QWidget):
         self.pixmap = pixmap
         self.update()
         return True
+
+    def reload_sticker_sets(self) -> list[str]:
+        self.config.sticker_sets = normalize_sticker_sets(self.config.sticker_sets)
+        frames: dict[str, list[QPixmap]] = {}
+        invalid_paths: list[str] = []
+        for action, paths in self.config.sticker_sets.items():
+            loaded: list[QPixmap] = []
+            for raw_path in paths:
+                image_path = Path(raw_path).expanduser()
+                pixmap = QPixmap(str(image_path))
+                if pixmap.isNull():
+                    invalid_paths.append(f"{action}: {raw_path}")
+                    continue
+                loaded.append(pixmap)
+            if loaded:
+                frames[action] = loaded
+        self.sticker_frames = frames
+        self.frame_index = 0
+        self.last_frame_at = time.monotonic()
+        if any(len(items) > 1 for items in self.sticker_frames.values()):
+            self.ensure_animation_timer()
+        self.update()
+        return invalid_paths
+
+    def sticker_frame_counts(self) -> dict[str, int]:
+        return {action: len(self.sticker_frames.get(action, [])) for action in STICKER_ACTIONS}
+
+    def action_frames(self, action: str) -> list[QPixmap]:
+        return self.sticker_frames.get(action) or self.sticker_frames.get(STICKER_ACTION_IDLE) or [self.pixmap]
+
+    def current_sticker_pixmap(self) -> QPixmap:
+        frames = self.action_frames(self.current_action)
+        if not frames:
+            return self.pixmap
+        return frames[self.frame_index % len(frames)]
+
+    def ensure_animation_timer(self) -> None:
+        if not self.pulse_timer.isActive():
+            self.pulse_timer.start()
+
+    def play_action(self, action: str, *, duration: float = 0.0, loop: bool = True, restart: bool = True) -> None:
+        if action not in STICKER_ACTIONS:
+            action = STICKER_ACTION_IDLE
+        now = time.monotonic()
+        if restart or action != self.current_action:
+            self.frame_index = 0
+            self.last_frame_at = now
+        self.current_action = action
+        self.action_loop = loop
+        self.action_until = now + duration if duration > 0 else 0.0
+        self.ensure_animation_timer()
+        self.update()
+
+    def update_active_action(self, now: float) -> None:
+        if self.current_action != STICKER_ACTION_IDLE and self.action_until > 0 and now >= self.action_until:
+            self.current_action = STICKER_ACTION_IDLE
+            self.action_loop = True
+            self.action_until = 0.0
+            self.frame_index = 0
+            self.last_frame_at = now
+
+    def advance_sticker_frame(self, now: float) -> None:
+        frames = self.action_frames(self.current_action)
+        if len(frames) <= 1:
+            return
+        interval = STICKER_FRAME_INTERVAL_MS / 1000
+        elapsed = now - self.last_frame_at
+        if elapsed < interval:
+            return
+        steps = max(1, int(elapsed / interval))
+        if self.action_loop:
+            self.frame_index = (self.frame_index + steps) % len(frames)
+        else:
+            self.frame_index = min(len(frames) - 1, self.frame_index + steps)
+        self.last_frame_at += steps * interval
+
+    def has_active_sticker_animation(self, now: float) -> bool:
+        if len(self.action_frames(self.current_action)) > 1:
+            return True
+        return self.current_action != STICKER_ACTION_IDLE and (self.action_until <= 0 or now < self.action_until)
 
     def refresh_window_icon(self) -> str:
         try:
@@ -268,7 +369,11 @@ class DesktopMentorPet(QWidget):
         self.move(area.right() - self.width() - 48, area.bottom() - self.height() - 64)
 
     def show_message(self) -> None:
-        self.show_bubble(self.config.click_message or self.default_message or DEFAULT_CLICK_MESSAGE, duration=self.message_duration())
+        self.show_bubble(
+            self.config.click_message or self.default_message or DEFAULT_CLICK_MESSAGE,
+            duration=self.message_duration(),
+            action=STICKER_ACTION_TAP,
+        )
 
     def message_duration(self) -> float:
         try:
@@ -276,23 +381,27 @@ class DesktopMentorPet(QWidget):
         except Exception:
             return DEFAULT_MESSAGE_SECONDS
 
-    def show_bubble(self, text: str, duration: float = 1.65) -> None:
+    def show_bubble(self, text: str, duration: float = 1.65, *, action: str | None = STICKER_ACTION_SPEAKING) -> None:
         now = time.monotonic()
         self.current_message = compact_text(text, MAX_BUBBLE_TEXT_CHARS)
         self.apply_bubble_layout(self.current_message)
         self.pulse_until = now + 0.38
         self.message_until = now + duration
-        if not self.pulse_timer.isActive():
-            self.pulse_timer.start()
+        if action is not None:
+            self.play_action(action, duration=duration, loop=True)
+        else:
+            self.ensure_animation_timer()
         self.update()
 
     def start_visual_effect(self, duration: float) -> None:
-        if not self.pulse_timer.isActive():
-            self.pulse_timer.start()
+        self.ensure_animation_timer()
         self.update()
 
     def show_agent_reply(self, text: str) -> None:
-        self.show_bubble(text, duration=self.message_duration())
+        self.show_bubble(text, duration=self.message_duration(), action=STICKER_ACTION_SPEAKING)
+
+    def show_agent_error(self, text: str) -> None:
+        self.show_bubble(text, duration=self.message_duration(), action=STICKER_ACTION_ERROR)
 
     def mark_interaction(self) -> None:
         self.last_interaction = time.monotonic()
@@ -317,7 +426,7 @@ class DesktopMentorPet(QWidget):
         if self.config.idle_mode == IDLE_MODE_FULLSCREEN:
             self.show_fullscreen_idle(message)
             return
-        self.show_bubble(message, duration=self.message_duration())
+        self.show_bubble(message, duration=self.message_duration(), action=STICKER_ACTION_ALERT)
 
     def clear_fullscreen_alert(self, alert: FullScreenIdleAlert) -> None:
         if self.fullscreen_alert is alert:
@@ -326,6 +435,7 @@ class DesktopMentorPet(QWidget):
     def show_fullscreen_idle(self, text: str) -> None:
         if self.fullscreen_alert is not None:
             self.fullscreen_alert.close()
+        self.play_action(STICKER_ACTION_ALERT, duration=max(FULLSCREEN_ALERT_DURATION_MS / 1000, self.message_duration()), loop=True)
         alert = FullScreenIdleAlert(text, int(self.message_duration() * 1000))
         self.fullscreen_alert = alert
         alert.destroyed.connect(lambda _obj=None, target=alert: self.clear_fullscreen_alert(target))
@@ -333,6 +443,8 @@ class DesktopMentorPet(QWidget):
 
     def animation_tick(self) -> None:
         now = time.monotonic()
+        self.update_active_action(now)
+        self.advance_sticker_frame(now)
         self.update()
         if (
             now >= self.pulse_until
@@ -342,8 +454,9 @@ class DesktopMentorPet(QWidget):
             and not self.drop_hover
             and not self.dragging
         ):
-            self.pulse_timer.stop()
             self.reset_bubble_layout()
+            if not self.has_active_sticker_animation(now):
+                self.pulse_timer.stop()
 
     @staticmethod
     def bubble_font() -> QFont:
@@ -503,7 +616,12 @@ class DesktopMentorPet(QWidget):
         self.drag_effect_until = time.monotonic() + DRAG_RELEASE_EFFECT_DURATION
         self.setCursor(Qt.CursorShape.ClosedHandCursor)
         self.start_visual_effect(DRAG_RELEASE_EFFECT_DURATION)
-        self.show_message()
+        self.show_bubble(
+            self.config.click_message or self.default_message or DEFAULT_CLICK_MESSAGE,
+            duration=self.message_duration(),
+            action=None,
+        )
+        self.play_action(STICKER_ACTION_DRAG, loop=True)
         if touch:
             self.touch_start_pos = global_pos
             self.touch_long_press_menu_opened = False
@@ -534,6 +652,7 @@ class DesktopMentorPet(QWidget):
         self.touch_menu_timer.stop()
         self.drag_effect_until = time.monotonic() + DRAG_RELEASE_EFFECT_DURATION
         self.setCursor(Qt.CursorShape.OpenHandCursor if self.hovering else Qt.CursorShape.ArrowCursor)
+        self.play_action(STICKER_ACTION_DRAG, duration=DRAG_RELEASE_EFFECT_DURATION, loop=True)
         self.start_visual_effect(DRAG_RELEASE_EFFECT_DURATION)
 
     def action_button_size(self) -> int:
@@ -604,6 +723,7 @@ class DesktopMentorPet(QWidget):
         self.pulse_until = time.monotonic() + 0.38
         if not self.pulse_timer.isActive():
             self.pulse_timer.start()
+        self.play_action(STICKER_ACTION_ALERT, duration=max(2.0, self.message_duration()), loop=True)
         self.update()
 
     def acknowledge_todo_reminder(self, todo_id: str) -> None:
@@ -667,6 +787,7 @@ class DesktopMentorPet(QWidget):
             self.drop_hover = True
             self.drop_effect_until = time.monotonic() + DROP_EFFECT_DURATION
             self.setCursor(Qt.CursorShape.DragCopyCursor)
+            self.play_action(STICKER_ACTION_DROP_FILE, loop=True)
             self.start_visual_effect(DROP_EFFECT_DURATION)
             event.acceptProposedAction()
             return
@@ -676,6 +797,7 @@ class DesktopMentorPet(QWidget):
         if self.local_drop_paths(event):
             self.drop_hover = True
             self.drop_effect_until = time.monotonic() + DROP_EFFECT_DURATION
+            self.play_action(STICKER_ACTION_DROP_FILE, loop=True)
             self.start_visual_effect(DROP_EFFECT_DURATION)
             event.acceptProposedAction()
             return
@@ -686,6 +808,7 @@ class DesktopMentorPet(QWidget):
         if not self.dragging:
             self.unsetCursor()
         self.drop_effect_until = time.monotonic() + 0.18
+        self.play_action(STICKER_ACTION_DROP_FILE, duration=0.18, loop=True)
         self.start_visual_effect(0.18)
         event.accept()
 
@@ -700,7 +823,11 @@ class DesktopMentorPet(QWidget):
         self.unsetCursor()
         self.last_drop_paths = [str(path) for path in paths]
         self.last_drop_context = collect_drop_context(paths)
-        self.show_bubble(f"{self.config.drop_message or DEFAULT_DROP_MESSAGE} 下次对话可选择加载这些上下文。", duration=self.message_duration())
+        self.show_bubble(
+            f"{self.config.drop_message or DEFAULT_DROP_MESSAGE} 下次对话可选择加载这些上下文。",
+            duration=self.message_duration(),
+            action=STICKER_ACTION_DROP_FILE,
+        )
         event.acceptProposedAction()
 
     def mousePressEvent(self, event: QMouseEvent) -> None:  # type: ignore[override]
@@ -942,7 +1069,7 @@ class DesktopMentorPet(QWidget):
                 new_config.config_dir = str(resolved_config_dir)
                 self.config_path = resolved_config_dir / "config.json"
             except OSError as exc:
-                self.show_bubble(f"配置目录不可用：{type(exc).__name__}", duration=self.message_duration())
+                self.show_bubble(f"配置目录不可用：{type(exc).__name__}", duration=self.message_duration(), action=STICKER_ACTION_ERROR)
                 return
             self.config = new_config
             if not self.apply_image_from_config(old_image_path):
@@ -950,8 +1077,9 @@ class DesktopMentorPet(QWidget):
                 self.config_path = old_config_path
                 self.image_path = old_image_path
                 self.pixmap = old_pixmap
-                self.show_bubble("形象文件加载失败，设置未保存。", duration=self.message_duration())
+                self.show_bubble("形象文件加载失败，设置未保存。", duration=self.message_duration(), action=STICKER_ACTION_ERROR)
                 return
+            invalid_stickers = self.reload_sticker_sets()
             icon_error = self.refresh_window_icon()
             saved_dir = save_config_directory(resolved_config_dir)
             self.config.config_dir = str(saved_dir)
@@ -963,7 +1091,9 @@ class DesktopMentorPet(QWidget):
             if self.config.idle_mode != IDLE_MODE_FULLSCREEN and self.fullscreen_alert is not None:
                 self.fullscreen_alert.close()
             if icon_error:
-                self.show_bubble(f"设置已保存，但 ICO 生成失败：{icon_error}", duration=self.message_duration())
+                self.show_bubble(f"设置已保存，但 ICO 生成失败：{icon_error}", duration=self.message_duration(), action=STICKER_ACTION_ERROR)
+            elif invalid_stickers:
+                self.show_bubble(f"设置已保存，但 {len(invalid_stickers)} 张动作贴纸加载失败。", duration=self.message_duration(), action=STICKER_ACTION_ERROR)
             else:
                 self.show_bubble(f"设置已保存：{path}", duration=self.message_duration())
 
@@ -1019,7 +1149,8 @@ class DesktopMentorPet(QWidget):
             return
         drop_context = self.last_drop_context if dialog.use_drop_context() else ""
         prompt = compose_prompt_with_drop_context(user_prompt, drop_context)
-        self.show_bubble("导师处理中。", duration=min(1.8, self.message_duration()))
+        self.show_bubble("导师处理中。", duration=min(1.8, self.message_duration()), action=None)
+        self.play_action(STICKER_ACTION_THINKING, loop=True)
         thread = threading.Thread(target=self.fetch_agent_reply, args=(prompt, user_prompt), daemon=True)
         thread.start()
 
@@ -1030,7 +1161,8 @@ class DesktopMentorPet(QWidget):
             return
         user_prompt = "请先概括这些文件/文件夹的内容，再指出最值得我下一步处理的事项。"
         prompt = compose_prompt_with_drop_context(user_prompt, self.last_drop_context)
-        self.show_bubble("导师正在看文件。", duration=min(1.8, self.message_duration()))
+        self.show_bubble("导师正在看文件。", duration=min(1.8, self.message_duration()), action=None)
+        self.play_action(STICKER_ACTION_THINKING, loop=True)
         thread = threading.Thread(target=self.fetch_agent_reply, args=(prompt, "只问文件"), daemon=True)
         thread.start()
 
@@ -1072,7 +1204,11 @@ class DesktopMentorPet(QWidget):
         dialog.move(x, y)
 
     def fetch_agent_reply(self, prompt: str, memory_prompt: str | None = None) -> None:
-        reply = call_agent(self.config, prompt)
+        try:
+            reply = call_agent(self.config, prompt)
+        except Exception as exc:
+            self.agent_signals.error_ready.emit(f"Agent 出错：{type(exc).__name__}: {exc}")
+            return
         if self.config.memory_enabled:
             try:
                 append_memory_turn(memory_prompt or prompt, reply)
@@ -1101,14 +1237,15 @@ class DesktopMentorPet(QWidget):
         self.draw_drag_effect(painter)
 
         sticker = self.sticker_rect()
-        visual = self.pixmap_fit_rect(sticker)
+        active_pixmap = self.current_sticker_pixmap()
+        visual = self.pixmap_fit_rect(sticker, active_pixmap)
         center = sticker.center()
         scale = self.scale()
         painter.save()
         painter.translate(center.x(), center.y())
         painter.scale(scale, scale)
         painter.translate(-center.x(), -center.y())
-        painter.drawPixmap(visual, self.pixmap, QRectF(self.pixmap.rect()))
+        painter.drawPixmap(visual, active_pixmap, QRectF(active_pixmap.rect()))
         painter.restore()
 
         self.draw_action_buttons(painter)
@@ -1117,8 +1254,9 @@ class DesktopMentorPet(QWidget):
         usable_width = max(self.pet_size, self.width() - self.action_rail_width())
         return QRectF((usable_width - self.pet_size) / 2, self.todo_stack_height + self.bubble_height + 6, self.pet_size, self.pet_size)
 
-    def pixmap_fit_rect(self, target: QRectF) -> QRectF:
-        image_ratio = self.pixmap.width() / max(1, self.pixmap.height())
+    def pixmap_fit_rect(self, target: QRectF, pixmap: QPixmap | None = None) -> QRectF:
+        source = pixmap or self.pixmap
+        image_ratio = source.width() / max(1, source.height())
         target_ratio = target.width() / max(1.0, target.height())
         if image_ratio >= target_ratio:
             width = target.width()

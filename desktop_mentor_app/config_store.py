@@ -4,7 +4,7 @@ from __future__ import annotations
 import json
 import os
 import sys
-from dataclasses import asdict, dataclass
+from dataclasses import asdict, dataclass, field
 from pathlib import Path
 
 from .constants import (
@@ -32,6 +32,7 @@ from .constants import (
     MIN_MESSAGE_SECONDS,
     MIN_TODO_REPEAT_SECONDS,
 )
+from .stickers import normalize_sticker_sets
 
 
 @dataclass
@@ -51,6 +52,7 @@ class AgentConfig:
     idle_mode: str = DEFAULT_IDLE_MODE
     memory_enabled: bool = DEFAULT_MEMORY_ENABLED
     memory_turns: int = DEFAULT_MEMORY_TURNS
+    sticker_sets: dict[str, list[str]] = field(default_factory=dict)
     system_prompt: str = DEFAULT_PERSONALITY_PROMPT
 
 
@@ -173,6 +175,8 @@ def load_config(path: Path | None = None) -> AgentConfig:
             setattr(config, key, data[key])
     config.model = str(config.model or DEFAULT_MODEL)
     config.image_path = str(config.image_path or "").strip()
+    config.icon_path = str(config.icon_path or "").strip()
+    config.sticker_sets = normalize_sticker_sets(config.sticker_sets)
     config.config_dir = str(target.parent.expanduser())
     config.click_message = str(config.click_message or DEFAULT_CLICK_MESSAGE)
     if config.click_message in LEGACY_CLICK_MESSAGES:

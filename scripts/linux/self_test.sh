@@ -51,6 +51,7 @@ step "Python syntax"
   desktop_mentor_app/constants.py \
   desktop_mentor_app/config_store.py \
   desktop_mentor_app/assets.py \
+  desktop_mentor_app/stickers.py \
   desktop_mentor_app/todo_store.py \
   desktop_mentor_app/agent_client.py \
   desktop_mentor_app/idle_detector.py \
@@ -83,6 +84,7 @@ DESKTOP_MENTOR_CONFIG_DIR="${DESKTOP_MENTOR_CONFIG_DIR:-/tmp/my-desktop-mentor-s
 "$PYTHON_FOR_QT" - <<'PY'
 import time
 import os
+import shutil
 import tempfile
 from pathlib import Path
 
@@ -92,8 +94,9 @@ from PySide6.QtWidgets import QApplication, QFrame, QMenu, QPushButton, QScrollA
 from desktop_mentor_app import config_store
 from desktop_mentor_app.assets import DEFAULT_IMAGE, ROOT
 from desktop_mentor_app.config_store import AgentConfig
-from desktop_mentor_app.constants import DEFAULT_CLICK_MESSAGE
+from desktop_mentor_app.constants import DEFAULT_CLICK_MESSAGE, STICKER_ACTION_IDLE, STICKER_ACTION_TAP
 from desktop_mentor_app.drop_context import DROP_CONTEXT_PROMPT_HEADER, collect_drop_context, compose_prompt_with_drop_context
+from desktop_mentor_app.stickers import discover_sticker_sets
 from desktop_mentor_app.todo_store import load_todos, save_todos
 from desktop_mentor_app.ui.dialogs import ChatDialog, SettingsDialog, TodoDialog, prepare_modern_menu
 from desktop_mentor_app.ui.pet_widget import DesktopMentorPet
@@ -105,6 +108,15 @@ context_chat = ChatDialog(context_hint="文件上下文：README.md")
 todos = TodoDialog([])
 menu = prepare_modern_menu(QMenu())
 pet = DesktopMentorPet(DEFAULT_IMAGE, DEFAULT_CLICK_MESSAGE, 120)
+pet.config.sticker_sets = {
+    STICKER_ACTION_IDLE: [str(DEFAULT_IMAGE), str(DEFAULT_IMAGE)],
+    STICKER_ACTION_TAP: [str(DEFAULT_IMAGE)],
+}
+assert pet.reload_sticker_sets() == []
+assert pet.sticker_frame_counts()[STICKER_ACTION_IDLE] == 2
+assert pet.sticker_frame_counts()[STICKER_ACTION_TAP] == 1
+pet.play_action(STICKER_ACTION_TAP, duration=0.2)
+assert pet.current_action == STICKER_ACTION_TAP
 pet.config.todo_repeat_seconds = 10
 drop_context = collect_drop_context([ROOT / "README.md", ROOT / ".env", ROOT / ".git"])
 drop_prompt = compose_prompt_with_drop_context("请总结", drop_context)
@@ -124,12 +136,24 @@ section_count = len([w for w in settings.findChildren(QFrame) if w.objectName() 
 scroll_count = len(settings.findChildren(QScrollArea))
 nav_buttons = [w for w in settings.findChildren(QPushButton) if w.objectName().startswith("railNavButton")]
 assert scroll_count == 1, scroll_count
-assert section_count >= 5, section_count
-assert len(nav_buttons) == 5, len(nav_buttons)
+assert section_count >= 6, section_count
+assert len(nav_buttons) == 6, len(nav_buttons)
 assert settings.windowFlags() & Qt.WindowType.FramelessWindowHint
 assert menu.testAttribute(Qt.WidgetAttribute.WA_TranslucentBackground)
 settings.scroll_to_section(2)
 assert any(button.text() == "互动" and button.objectName() == "railNavButtonActive" for button in nav_buttons)
+assert settings.sticker_editor.to_sticker_sets() == {}
+
+with tempfile.TemporaryDirectory() as sticker_tmp:
+    sticker_root = Path(sticker_tmp)
+    for action in (STICKER_ACTION_IDLE, STICKER_ACTION_TAP):
+        action_dir = sticker_root / action
+        action_dir.mkdir()
+        shutil.copyfile(DEFAULT_IMAGE, action_dir / f"{action}_000.png")
+        shutil.copyfile(DEFAULT_IMAGE, action_dir / f"{action}_001.png")
+    discovered = discover_sticker_sets(sticker_root)
+    assert len(discovered[STICKER_ACTION_IDLE]) == 2, discovered
+    assert len(discovered[STICKER_ACTION_TAP]) == 2, discovered
 assert chat.text() == ""
 assert context_chat.use_drop_context()
 context_chat.remove_drop_context()

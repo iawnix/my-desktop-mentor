@@ -1,13 +1,13 @@
 # 我的桌面导师
 
-一个可配置的桌面导师 / 桌宠应用。主程序是 PySide6 写的透明置顶贴纸窗口，支持鼠标和触屏拖动、贴纸旁按钮对话/设置/退出、右键待办提醒、空闲提醒、文件/文件夹拖放、OpenAI-compatible agent 接口、可选本地对话记忆，以及 Windows 打包。
+一个可配置的桌面导师 / 桌宠应用。主程序是 PySide6 写的透明置顶贴纸窗口，支持鼠标和触屏拖动、动作贴纸动画、贴纸旁按钮对话/设置/退出、右键待办提醒、空闲提醒、文件/文件夹拖放、OpenAI-compatible agent 接口、可选本地对话记忆，以及 Windows 打包。
 
 ## 目录
 
 根目录现在只保留核心入口和一级分类目录：
 
 - `desktop_mentor.py`：CLI 入口，只负责参数解析、Qt 应用启动和 self-test 输出。
-- `desktop_mentor_app/`：应用包，包含配置、资源、agent、待办、idle 检测、drop 上下文和 UI 组件。
+- `desktop_mentor_app/`：应用包，包含配置、资源、动作贴纸、agent、待办、idle 检测、drop 上下文和 UI 组件。
 - `requirements.txt`：源码运行依赖。
 - `assets/`：必要默认素材。
 - `scripts/`：Linux / Windows 启动和打包脚本。
@@ -23,6 +23,7 @@
 - `assets/todo_badge.png`：待办窗口图标。
 - `desktop_mentor_app/config_store.py`：运行时配置、配置目录切换、配置迁移和记忆/待办路径。
 - `desktop_mentor_app/assets.py`：默认资源路径、PNG 到 ICO 转换、用户图标缓存。
+- `desktop_mentor_app/stickers.py`：动作贴纸集清洗、顺序保留和帧数量统计。
 - `desktop_mentor_app/agent_client.py`：OpenAI-compatible URL 归一化、请求、本地 fallback 和可选记忆拼接。
 - `desktop_mentor_app/todo_store.py`：待办清洗、排序、读写和到期过滤。
 - `desktop_mentor_app/idle_detector.py`：Windows、GNOME、xprintidle 空闲时间检测。
@@ -118,6 +119,7 @@ dist\MyDesktopMentor.exe
 - `Model`
 - `Config directory`
 - `Pet image`
+- `Action stickers`
 - `Click message`
 - `Idle message`
 - `Drop message`
@@ -132,6 +134,39 @@ dist\MyDesktopMentor.exe
 贴纸右侧有三个圆形按钮，从上到下是：对话、设置、退出。对话框会贴近桌宠显示，并自动避开屏幕边界。
 
 默认人格是友好的科研导师。这个项目本身是桌面导师框架，用户可以通过设置修改形象、话术、空闲提醒、drop 行为和 style prompt，形成自己的导师桌宠。
+
+`Action stickers` 支持 8 类动作素材，设置页会按动作分组录入图片路径，并按行顺序播放：
+
+- `idle`
+- `tap`
+- `drag`
+- `thinking`
+- `speaking`
+- `alert`
+- `drop_file`
+- `error`
+
+每个动作建议准备约 8 张图片；程序不强制数量，1 张会作为静态动作，多张会按 `120 ms/frame` 循环播放。没有配置动作素材时会回退到 `Pet image` 或默认 `assets/cow.png`。这些素材路径只写入用户运行时 `config.json`，不复制到项目目录；后续给素材时，可以在设置页点 `导入动作目录` 选择包含上述 8 个子目录的素材根目录，也可以在对应动作里用“按顺序选择”，或手动按每行一张路径排列。
+
+命令行导入动作目录：
+
+```bash
+python3 desktop_mentor.py --load-sticker-dir /path/to/stickers
+```
+
+素材目录格式：
+
+```text
+stickers/
+  idle/*.png
+  tap/*.png
+  drag/*.png
+  thinking/*.png
+  speaking/*.png
+  alert/*.png
+  drop_file/*.png
+  error/*.png
+```
 
 启用 `Memory` 后，程序会把最近对话保存在用户配置目录下的 `memory.jsonl`，并在调用 agent 时带上最近若干轮上下文。默认关闭，不会写入项目目录。
 
@@ -173,7 +208,7 @@ DESKTOP_MENTOR_CONFIG=/path/to/config.json ./scripts/linux/run_desktop_mentor.sh
 - `desktop-file-validate packaging/linux/desktop_mentor.desktop`
 - `python3 -m py_compile packaging/windows/desktop_mentor.spec`
 - `./scripts/linux/self_test.sh`
-- offscreen 设置/运行时 smoke test
+- offscreen 设置/动作贴纸/运行时 smoke test
 - 最终文件列表只包含源码、必要素材、运行/打包脚本、依赖文件和文档。
 
 ## 边界
