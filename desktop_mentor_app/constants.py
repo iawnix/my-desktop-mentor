@@ -1,0 +1,73 @@
+"""Shared constants for My Desktop Mentor."""
+from __future__ import annotations
+
+APP_NAME = "我的桌面导师"
+APP_ID = "my-desktop-mentor"
+DEFAULT_MODEL = "gpt-4o-mini"
+CONFIG_POINTER_NAME = "config-dir.txt"
+
+DEFAULT_CLICK_MESSAGE = "我在。把目标和卡点说清楚，我们先找下一步。"
+DEFAULT_IDLE_MESSAGE = "进展怎么样？需要我帮你梳理一下下一步吗？"
+DEFAULT_DROP_MESSAGE = "文件我收到了。先看目标、约束和你最想解决的问题。"
+LEGACY_CLICK_MESSAGES = {"抓紧, 谢谢!"}
+LEGACY_IDLE_MESSAGES = {"课题如何了? 抓紧谢谢!"}
+LEGACY_DROP_MESSAGES = {"这种垃圾就不要让我看, 我每天很忙的!"}
+
+ICON_SIZES = (16, 24, 32, 48, 64, 128, 256)
+BUBBLE_MIN_HEIGHT = 88
+BUBBLE_TOP = 7
+BUBBLE_TAIL_HEIGHT = 16
+BUBBLE_BOTTOM_PAD = 9
+BUBBLE_MIN_WIDTH = 202
+BUBBLE_MAX_WIDTH = 420
+BUBBLE_BODY_MIN_HEIGHT = 56
+BUBBLE_BODY_MAX_HEIGHT = 320
+BUBBLE_TEXT_PAD_X = 12
+BUBBLE_TEXT_PAD_Y = 10
+MAX_BUBBLE_TEXT_CHARS = 520
+CHAT_BUTTON_MIN_SIZE = 30
+CHAT_BUTTON_MAX_SIZE = 44
+ACTION_BUTTON_MIN_SIZE = 32
+ACTION_BUTTON_MAX_SIZE = 42
+ACTION_BUTTON_GAP = 8
+ACTION_BUTTON_STICKER_GAP = 9
+ACTION_BUTTON_OUTER_PAD = 8
+DROP_HOTZONE_PAD = 30
+DROP_EFFECT_DURATION = 0.9
+DRAG_RELEASE_EFFECT_DURATION = 0.22
+CHAT_BUTTON_MARGIN = 4
+WINDOW_PAD = 15
+
+TODO_CHECK_INTERVAL_MS = 1_000
+DEFAULT_MESSAGE_SECONDS = 3.2
+MIN_MESSAGE_SECONDS = 0.8
+MAX_MESSAGE_SECONDS = 60.0
+DEFAULT_MEMORY_ENABLED = False
+DEFAULT_MEMORY_TURNS = 8
+MAX_MEMORY_TURNS = 24
+MIN_IDLE_SECONDS = 30
+DEFAULT_IDLE_SECONDS = 30
+IDLE_CHECK_INTERVAL_MS = 5_000
+IDLE_MODE_LIGHT = "light"
+IDLE_MODE_FULLSCREEN = "fullscreen"
+DEFAULT_IDLE_MODE = IDLE_MODE_LIGHT
+IDLE_MODE_OPTIONS = (
+    (IDLE_MODE_LIGHT, "轻量气泡"),
+    (IDLE_MODE_FULLSCREEN, "满屏提醒"),
+)
+FULLSCREEN_ALERT_DURATION_MS = 4_200
+
+DEFAULT_PERSONALITY_PROMPT = """你是桌面宠物 agent「我的桌面导师」，默认形象是一位对学生友好、清晰、可靠的科研导师。
+
+沟通风格：
+- 先理解学生的目标和当前卡点，再给出可执行的下一步。
+- 语气温和直接，不羞辱、不PUA、不制造无意义压力。
+- 对科研问题，帮助拆分为：问题定义、已有证据、关键风险、下一步实验或写作动作。
+- 对日常任务，回复要短，优先给具体行动建议。
+- 长期没有互动时，用配置里的 idle 提醒话术轻量询问进展。
+
+输出要求：
+- 默认每次不超过 3 句话。
+- 可以鼓励进度，但不要替用户夸大成果。
+- 不知道时直接说明，并建议如何补充信息。
+"""

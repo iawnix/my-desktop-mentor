@@ -1,6 +1,6 @@
 # TODO: 我的桌面导师
 
-当前状态：项目已经是可运行原型，核心能力包括透明桌宠、拖动、对话、设置、待办、空闲提醒、文件拖放、OpenAI-compatible agent、可选本地记忆和 Windows 打包。下一步优化重点不是继续堆功能，而是提高可维护性、启动可靠性和真实使用体验。
+当前状态：项目已经是可运行原型，核心能力包括透明桌宠、拖动、对话、设置、待办、空闲提醒、文件拖放、OpenAI-compatible agent、可选本地记忆和 Windows 打包。P1 单文件拆分已完成，下一步优化重点不是继续堆功能，而是提高真实使用体验和发布可靠性。
 
 ## P0: 先稳住当前基线
 
@@ -14,15 +14,15 @@
 
 `desktop_mentor.py` 已超过 2600 行。继续单文件开发会让 UI、agent、配置、存储和平台兼容逻辑互相缠住。
 
-- [x] 建立包结构 `desktop_mentor_app/`，先保留根目录 `desktop_mentor.py` 作为入口和主 UI 容器。
-- [ ] 拆出 `config_store.py`：`AgentConfig`、默认值、配置目录指针、配置读写、配置迁移。
-- [ ] 拆出 `todo_store.py`：待办读写、清洗、排序、到期过滤。
-- [ ] 拆出 `agent_client.py`：OpenAI-compatible URL 归一化、请求、错误处理、本地 fallback、记忆拼接。
+- [x] 建立包结构 `desktop_mentor_app/`，根目录 `desktop_mentor.py` 保留为薄 CLI 入口。
+- [x] 拆出 `config_store.py`：`AgentConfig`、默认值、配置目录指针、配置读写、配置迁移。
+- [x] 拆出 `todo_store.py`：待办读写、清洗、排序、到期过滤。
+- [x] 拆出 `agent_client.py`：OpenAI-compatible URL 归一化、请求、错误处理、本地 fallback、记忆拼接。
 - [x] 拆出 `drop_context.py`：文件/文件夹描述、文本预览、大小限制、敏感文件跳过规则。
-- [ ] 拆出 `idle_detector.py`：Windows idle、GNOME idle、xprintidle fallback。
-- [ ] 拆出 `ui/dialogs.py`：设置、对话、待办、满屏提醒。
-- [ ] 拆出 `ui/pet_widget.py`：透明桌宠窗口、绘制、拖动、触摸、按钮、bubble 布局。
-- [ ] 拆出 `assets.py`：资源路径、ICO 生成和缓存路径。
+- [x] 拆出 `idle_detector.py`：Windows idle、GNOME idle、xprintidle fallback。
+- [x] 拆出 `ui/dialogs.py`：设置、对话、待办、满屏提醒。
+- [x] 拆出 `ui/pet_widget.py`：透明桌宠窗口、绘制、拖动、触摸、按钮、bubble 布局。
+- [x] 拆出 `assets.py`：资源路径、ICO 生成和缓存路径。
 
 ## P2: 让文件拖放真的进入导师对话
 
@@ -85,4 +85,4 @@ python3 -m py_compile packaging/windows/desktop_mentor.spec
 
 ## 建议下一步
 
-先做 P0 + P1：修启动脚本诊断，补自测脚本，然后把 `desktop_mentor.py` 拆成包结构。完成后再做 P2 的文件上下文进入对话，这会明显提升项目的实际可用性。
+P0、P1、P2 已收口。下一步优先做 P4 的 agent 交互状态和长回复详情，再做 P5 的托盘/窗口位置/安装路径，最后把 P6 中的单元测试补齐。

@@ -46,7 +46,18 @@ step() {
 }
 
 step "Python syntax"
-"$PYTHON_FOR_COMPILE" -m py_compile desktop_mentor.py desktop_mentor_app/drop_context.py packaging/windows/desktop_mentor.spec
+"$PYTHON_FOR_COMPILE" -m py_compile \
+  desktop_mentor.py \
+  desktop_mentor_app/constants.py \
+  desktop_mentor_app/config_store.py \
+  desktop_mentor_app/assets.py \
+  desktop_mentor_app/todo_store.py \
+  desktop_mentor_app/agent_client.py \
+  desktop_mentor_app/idle_detector.py \
+  desktop_mentor_app/drop_context.py \
+  desktop_mentor_app/ui/dialogs.py \
+  desktop_mentor_app/ui/pet_widget.py \
+  packaging/windows/desktop_mentor.spec
 
 step "Linux launcher syntax"
 bash -n scripts/linux/run_desktop_mentor.sh
@@ -72,32 +83,47 @@ DESKTOP_MENTOR_CONFIG_DIR="${DESKTOP_MENTOR_CONFIG_DIR:-/tmp/my-desktop-mentor-s
 "$PYTHON_FOR_QT" - <<'PY'
 import time
 
-from PySide6.QtWidgets import QApplication, QFrame, QScrollArea
+from PySide6.QtWidgets import QApplication, QFrame, QPushButton, QScrollArea
 
-import desktop_mentor as dm
+from desktop_mentor_app.assets import DEFAULT_IMAGE, ROOT
+from desktop_mentor_app.config_store import AgentConfig
+from desktop_mentor_app.constants import DEFAULT_CLICK_MESSAGE
+from desktop_mentor_app.drop_context import DROP_CONTEXT_PROMPT_HEADER, collect_drop_context, compose_prompt_with_drop_context
+from desktop_mentor_app.todo_store import load_todos, save_todos
+from desktop_mentor_app.ui.dialogs import ChatDialog, SettingsDialog, TodoDialog
+from desktop_mentor_app.ui.pet_widget import DesktopMentorPet
 
 app = QApplication([])
-settings = dm.SettingsDialog(dm.AgentConfig())
-chat = dm.ChatDialog()
-todos = dm.TodoDialog([])
-pet = dm.DesktopMentorPet(dm.DEFAULT_IMAGE, dm.DEFAULT_CLICK_MESSAGE, 120)
-drop_context = dm.collect_drop_context([dm.ROOT / "README.md", dm.ROOT / ".env", dm.ROOT / ".git"])
-drop_prompt = dm.compose_prompt_with_drop_context("请总结", drop_context)
+settings = SettingsDialog(AgentConfig())
+chat = ChatDialog()
+context_chat = ChatDialog(context_hint="文件上下文：README.md")
+todos = TodoDialog([])
+pet = DesktopMentorPet(DEFAULT_IMAGE, DEFAULT_CLICK_MESSAGE, 120)
+drop_context = collect_drop_context([ROOT / "README.md", ROOT / ".env", ROOT / ".git"])
+drop_prompt = compose_prompt_with_drop_context("请总结", drop_context)
 
-dm.save_todos([{"id": "self-test", "text": "self-test todo", "due_ts": int(time.time()) - 1}])
+save_todos([{"id": "self-test", "text": "self-test todo", "due_ts": int(time.time()) - 1}])
 pet.check_todos()
 
 section_count = len([w for w in settings.findChildren(QFrame) if w.objectName() == "sectionCard"])
 scroll_count = len(settings.findChildren(QScrollArea))
+nav_buttons = [w for w in settings.findChildren(QPushButton) if w.objectName().startswith("railNavButton")]
 assert scroll_count == 1, scroll_count
 assert section_count >= 5, section_count
+assert len(nav_buttons) == 5, len(nav_buttons)
+settings.scroll_to_section(2)
+assert any(button.text() == "互动" and button.objectName() == "railNavButtonActive" for button in nav_buttons)
 assert chat.text() == ""
-assert dm.load_todos() == []
+assert context_chat.use_drop_context()
+context_chat.remove_drop_context()
+assert context_chat.drop_context_was_removed()
+assert not context_chat.use_drop_context()
+assert load_todos() == []
 assert pet.idle_suppressed_until > time.monotonic()
 assert "README.md" in drop_context
 assert "skipped sensitive filename" in drop_context
 assert "skipped generated/cache folder" in drop_context
-assert dm.DROP_CONTEXT_PROMPT_HEADER in drop_prompt
+assert DROP_CONTEXT_PROMPT_HEADER in drop_prompt
 print("[self-test] dialog smoke ok")
 PY
 

@@ -6,8 +6,8 @@
 
 根目录现在只保留核心入口和一级分类目录：
 
-- `desktop_mentor.py`：主源码。
-- `desktop_mentor_app/`：可复用业务模块，逐步从主入口中拆分。
+- `desktop_mentor.py`：CLI 入口，只负责参数解析、Qt 应用启动和 self-test 输出。
+- `desktop_mentor_app/`：应用包，包含配置、资源、agent、待办、idle 检测、drop 上下文和 UI 组件。
 - `requirements.txt`：源码运行依赖。
 - `assets/`：必要默认素材。
 - `scripts/`：Linux / Windows 启动和打包脚本。
@@ -21,7 +21,14 @@
 - `assets/cow.png`：默认桌宠形象。
 - `assets/desktop_mentor.ico`：由默认 PNG 自动生成的 Windows exe 图标。
 - `assets/todo_badge.png`：待办窗口图标。
+- `desktop_mentor_app/config_store.py`：运行时配置、配置目录切换、配置迁移和记忆/待办路径。
+- `desktop_mentor_app/assets.py`：默认资源路径、PNG 到 ICO 转换、用户图标缓存。
+- `desktop_mentor_app/agent_client.py`：OpenAI-compatible URL 归一化、请求、本地 fallback 和可选记忆拼接。
+- `desktop_mentor_app/todo_store.py`：待办清洗、排序、读写和到期过滤。
+- `desktop_mentor_app/idle_detector.py`：Windows、GNOME、xprintidle 空闲时间检测。
 - `desktop_mentor_app/drop_context.py`：文件/文件夹拖放上下文收集、敏感路径跳过和 prompt 拼接。
+- `desktop_mentor_app/ui/dialogs.py`：设置、对话、详情、待办和满屏提醒窗口。
+- `desktop_mentor_app/ui/pet_widget.py`：透明桌宠窗口、绘制、鼠标/触屏拖动、按钮、菜单和 bubble 布局。
 - `requirements.txt`：源码运行依赖。
 - `scripts/linux/run_desktop_mentor.sh`：Linux 启动脚本。
 - `scripts/linux/self_test.sh`：Linux 一键自测脚本。
@@ -131,7 +138,7 @@ dist\MyDesktopMentor.exe
 
 右键菜单里的 `待办` 可以添加定时提醒。待办到期后桌宠会提醒一次，并从待办列表删除；待办提醒触发时会短暂压制 idle 提醒，避免两套机制同时弹出。
 
-拖放文件或文件夹到桌宠后，下一次对话会自动附加该文件上下文；右键菜单会出现 `只问文件`、`文件摘要`、`清除文件上下文`。拖放预览会跳过 `.env`、token、secret、password、credential、SSH 私钥名，以及 `.git/`、缓存目录和构建产物。
+拖放文件或文件夹到桌宠后，下一次对话会显示文件上下文 chip；用户可以勾选是否加载到本次对话，也可以点 `x` 直接移除。右键菜单会出现 `只问文件`、`文件摘要`、`清除文件上下文`。拖放预览会跳过 `.env`、token、secret、password、credential、SSH 私钥名，以及 `.git/`、缓存目录和构建产物。
 
 用户提供 PNG 形象时，程序会在用户配置目录下自动缓存对应 ICO；默认 PNG 可手动转换：
 

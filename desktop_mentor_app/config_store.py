@@ -1,0 +1,172 @@
+"""Runtime configuration storage."""
+from __future__ import annotations
+
+import json
+import os
+import sys
+from dataclasses import asdict, dataclass
+from pathlib import Path
+
+from .constants import (
+    APP_ID,
+    CONFIG_POINTER_NAME,
+    DEFAULT_CLICK_MESSAGE,
+    DEFAULT_DROP_MESSAGE,
+    DEFAULT_IDLE_MESSAGE,
+    DEFAULT_IDLE_MODE,
+    DEFAULT_IDLE_SECONDS,
+    DEFAULT_MEMORY_ENABLED,
+    DEFAULT_MEMORY_TURNS,
+    DEFAULT_MESSAGE_SECONDS,
+    DEFAULT_MODEL,
+    DEFAULT_PERSONALITY_PROMPT,
+    IDLE_MODE_OPTIONS,
+    LEGACY_CLICK_MESSAGES,
+    LEGACY_DROP_MESSAGES,
+    LEGACY_IDLE_MESSAGES,
+    MAX_MEMORY_TURNS,
+    MAX_MESSAGE_SECONDS,
+    MIN_IDLE_SECONDS,
+    MIN_MESSAGE_SECONDS,
+)
+
+
+@dataclass
+class AgentConfig:
+    api_url: str = ""
+    api_key: str = ""
+    model: str = DEFAULT_MODEL
+    image_path: str = ""
+    icon_path: str = ""
+    config_dir: str = ""
+    click_message: str = DEFAULT_CLICK_MESSAGE
+    idle_message: str = DEFAULT_IDLE_MESSAGE
+    drop_message: str = DEFAULT_DROP_MESSAGE
+    message_seconds: float = DEFAULT_MESSAGE_SECONDS
+    idle_seconds: int = DEFAULT_IDLE_SECONDS
+    idle_mode: str = DEFAULT_IDLE_MODE
+    memory_enabled: bool = DEFAULT_MEMORY_ENABLED
+    memory_turns: int = DEFAULT_MEMORY_TURNS
+    system_prompt: str = DEFAULT_PERSONALITY_PROMPT
+
+
+def default_config_dir() -> Path:
+    if sys.platform == "win32":
+        base = Path(os.environ.get("APPDATA", Path.home() / "AppData" / "Roaming"))
+        return base / "MyDesktopMentor"
+    if sys.platform == "darwin":
+        return Path.home() / "Library" / "Application Support" / "MyDesktopMentor"
+
+    base = Path(os.environ.get("XDG_CONFIG_HOME", Path.home() / ".config"))
+    return base / APP_ID
+
+
+def config_dir_pointer_path() -> Path:
+    return default_config_dir() / CONFIG_POINTER_NAME
+
+
+def configured_config_dir() -> Path:
+    override_dir = os.environ.get("DESKTOP_MENTOR_CONFIG_DIR", "").strip()
+    if override_dir:
+        return Path(override_dir).expanduser()
+
+    override_file = os.environ.get("DESKTOP_MENTOR_CONFIG", "").strip()
+    if override_file:
+        return Path(override_file).expanduser().parent
+
+    pointer = config_dir_pointer_path()
+    try:
+        if pointer.exists():
+            raw_path = pointer.read_text(encoding="utf-8").strip()
+            if raw_path:
+                return Path(raw_path).expanduser()
+    except OSError:
+        pass
+
+    return default_config_dir()
+
+
+def config_path() -> Path:
+    override = os.environ.get("DESKTOP_MENTOR_CONFIG", "").strip()
+    if override:
+        return Path(override).expanduser()
+    return configured_config_dir() / "config.json"
+
+
+def save_config_directory(directory: Path) -> Path:
+    target = directory.expanduser().resolve()
+    target.mkdir(parents=True, exist_ok=True)
+    pointer = config_dir_pointer_path()
+    pointer.parent.mkdir(parents=True, exist_ok=True)
+    pointer.write_text(str(target), encoding="utf-8")
+    return target
+
+
+def memory_path() -> Path:
+    return config_path().parent / "memory.jsonl"
+
+
+def todos_path() -> Path:
+    return config_path().parent / "todos.json"
+
+
+def load_config(path: Path | None = None) -> AgentConfig:
+    target = path or config_path()
+    if not target.exists():
+        config = AgentConfig()
+        config.config_dir = str(target.parent.expanduser())
+        return config
+    try:
+        data = json.loads(target.read_text(encoding="utf-8"))
+    except Exception:
+        config = AgentConfig()
+        config.config_dir = str(target.parent.expanduser())
+        return config
+
+    config = AgentConfig()
+    for key in asdict(config):
+        if key in data:
+            setattr(config, key, data[key])
+    config.model = str(config.model or DEFAULT_MODEL)
+    config.image_path = str(config.image_path or "").strip()
+    config.config_dir = str(target.parent.expanduser())
+    config.click_message = str(config.click_message or DEFAULT_CLICK_MESSAGE)
+    if config.click_message in LEGACY_CLICK_MESSAGES:
+        config.click_message = DEFAULT_CLICK_MESSAGE
+    config.idle_message = str(config.idle_message or DEFAULT_IDLE_MESSAGE)
+    if config.idle_message in LEGACY_IDLE_MESSAGES:
+        config.idle_message = DEFAULT_IDLE_MESSAGE
+    config.drop_message = str(config.drop_message or DEFAULT_DROP_MESSAGE)
+    if config.drop_message in LEGACY_DROP_MESSAGES:
+        config.drop_message = DEFAULT_DROP_MESSAGE
+    try:
+        config.message_seconds = max(
+            MIN_MESSAGE_SECONDS,
+            min(MAX_MESSAGE_SECONDS, float(config.message_seconds)),
+        )
+    except Exception:
+        config.message_seconds = DEFAULT_MESSAGE_SECONDS
+    try:
+        config.idle_seconds = max(MIN_IDLE_SECONDS, int(config.idle_seconds))
+    except Exception:
+        config.idle_seconds = DEFAULT_IDLE_SECONDS
+    config.memory_enabled = bool(config.memory_enabled)
+    try:
+        config.memory_turns = max(1, min(MAX_MEMORY_TURNS, int(config.memory_turns)))
+    except Exception:
+        config.memory_turns = DEFAULT_MEMORY_TURNS
+    valid_idle_modes = {value for value, _label in IDLE_MODE_OPTIONS}
+    config.idle_mode = str(config.idle_mode or DEFAULT_IDLE_MODE)
+    if config.idle_mode not in valid_idle_modes:
+        config.idle_mode = DEFAULT_IDLE_MODE
+    config.system_prompt = str(config.system_prompt or DEFAULT_PERSONALITY_PROMPT)
+    if any(marker in config.system_prompt for marker in ("我是长江", "科研老板式", "发 Nature", "这种小事")):
+        config.system_prompt = DEFAULT_PERSONALITY_PROMPT
+    return config
+
+
+def save_config(config: AgentConfig, path: Path | None = None) -> Path:
+    target = path or config_path()
+    target.parent.mkdir(parents=True, exist_ok=True)
+    target.write_text(json.dumps(asdict(config), ensure_ascii=False, indent=2), encoding="utf-8")
+    return target
