@@ -122,6 +122,7 @@ dist\MyDesktopMentor.exe
 - `Idle message`
 - `Drop message`
 - `Message duration`
+- `Todo repeat`
 - `Idle reminder`
 - `Idle mode`
 - `Memory`
@@ -136,7 +137,7 @@ dist\MyDesktopMentor.exe
 
 `Config directory` 可以切换运行时设置目录；`config.json`、`memory.jsonl`、`todos.json` 和自动生成的图标缓存都会跟着这个目录走。
 
-右键菜单里的 `待办` 可以添加定时提醒。待办到期后桌宠会提醒一次，并从待办列表删除；待办提醒触发时会短暂压制 idle 提醒，避免两套机制同时弹出。
+右键菜单里的 `待办` 可以添加定时提醒。时间输入框固定为 `年-月-日 时:分:秒` 格式，可直接输入数字。待办到期后会在桌面上生成持久提醒泡泡；泡泡默认不自动消失，点击任意一个同待办泡泡后才确认并删除该待办。若一直不点击，程序会按 `Todo repeat` 间隔移除旧到期事件并追加下一次待办提醒，桌面上会保留累计提醒泡泡。待办泡泡存在时会压制 idle 提醒，避免两套机制同时弹出。
 
 拖放文件或文件夹到桌宠后，下一次对话会显示文件上下文 chip；用户可以勾选是否加载到本次对话，也可以点 `x` 直接移除。右键菜单会出现 `只问文件`、`文件摘要`、`清除文件上下文`。拖放预览会跳过 `.env`、token、secret、password、credential、SSH 私钥名，以及 `.git/`、缓存目录和构建产物。
 
@@ -151,6 +152,8 @@ python3 desktop_mentor.py --make-icon /path/to/source.png /path/to/output.ico
 - Linux: `~/.config/my-desktop-mentor/config.json`
 - Windows: `%APPDATA%\MyDesktopMentor\config.json`
 - macOS: `~/Library/Application Support/MyDesktopMentor/config.json`
+
+程序启动时会优先继承已有配置：环境变量指定的位置优先，其次是已保存的 `Config directory` 指针；如果指针目录还没有 `config.json`，会继续扫描系统默认配置目录和旧版本配置目录，找到已有 `config.json` 就直接沿用。
 
 也可以用环境变量覆盖配置文件位置：
 

@@ -3,6 +3,7 @@ from __future__ import annotations
 
 import json
 import time
+from collections.abc import Iterable
 from pathlib import Path
 
 from .config_store import todos_path
@@ -56,5 +57,28 @@ def load_todos_from_items(items: list[dict[str, object]]) -> list[dict[str, obje
     return sorted(todos, key=lambda row: int(row["due_ts"]))
 
 
+def due_todos(todos: list[dict[str, object]], now_ts: int | None = None) -> list[dict[str, object]]:
+    now_value = int(now_ts if now_ts is not None else time.time())
+    return [todo for todo in todos if int(todo["due_ts"]) <= now_value]
+
+
+def future_todos(todos: list[dict[str, object]], now_ts: int | None = None) -> list[dict[str, object]]:
+    now_value = int(now_ts if now_ts is not None else time.time())
+    return [todo for todo in todos if int(todo["due_ts"]) > now_value]
+
+
+def rescheduled_todo(todo: dict[str, object], due_ts: int) -> dict[str, object]:
+    return {
+        "id": str(todo["id"]),
+        "text": str(todo["text"]),
+        "due_ts": int(due_ts),
+    }
+
+
+def remove_todos_by_ids(todos: list[dict[str, object]], todo_ids: Iterable[str]) -> list[dict[str, object]]:
+    ids = {str(todo_id) for todo_id in todo_ids}
+    return [todo for todo in todos if str(todo["id"]) not in ids]
+
+
 def format_due_time(due_ts: int) -> str:
-    return time.strftime("%Y-%m-%d %H:%M", time.localtime(due_ts))
+    return time.strftime("%Y-%m-%d %H:%M:%S", time.localtime(due_ts))

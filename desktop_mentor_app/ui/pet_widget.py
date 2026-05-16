@@ -36,6 +36,7 @@ from ..constants import (
     DEFAULT_IDLE_MESSAGE,
     DEFAULT_IDLE_SECONDS,
     DEFAULT_MESSAGE_SECONDS,
+    DEFAULT_TODO_REPEAT_SECONDS,
     DRAG_RELEASE_EFFECT_DURATION,
     DROP_EFFECT_DURATION,
     DROP_HOTZONE_PAD,
@@ -43,15 +44,26 @@ from ..constants import (
     IDLE_MODE_FULLSCREEN,
     MAX_BUBBLE_TEXT_CHARS,
     MAX_MESSAGE_SECONDS,
+    MAX_TODO_REPEAT_SECONDS,
     MIN_IDLE_SECONDS,
     MIN_MESSAGE_SECONDS,
+    MIN_TODO_REPEAT_SECONDS,
     TODO_CHECK_INTERVAL_MS,
+    TODO_BUBBLE_GAP,
+    TODO_BUBBLE_MAX_HEIGHT,
+    TODO_BUBBLE_MAX_VISIBLE,
+    TODO_BUBBLE_MAX_WIDTH,
+    TODO_BUBBLE_MIN_HEIGHT,
+    TODO_BUBBLE_MIN_WIDTH,
+    TODO_BUBBLE_TEXT_PAD_X,
+    TODO_BUBBLE_TEXT_PAD_Y,
+    TODO_BUBBLE_TOP,
     WINDOW_PAD,
 )
 from ..drop_context import collect_drop_context, compose_prompt_with_drop_context
 from ..idle_detector import system_idle_seconds
-from ..todo_store import load_todos, save_todos
-from .dialogs import APP_STYLESHEET, ChatDialog, FullScreenIdleAlert, SettingsDialog, TextViewDialog, TodoDialog
+from ..todo_store import due_todos, future_todos, load_todos, remove_todos_by_ids, rescheduled_todo, save_todos
+from .dialogs import ChatDialog, FullScreenIdleAlert, SettingsDialog, TextViewDialog, TodoDialog, prepare_modern_menu
 
 
 class AgentSignals(QObject):
@@ -157,6 +169,8 @@ class DesktopMentorPet(QWidget):
         self.touch_long_press_menu_opened = False
         self.last_drop_context = ""
         self.last_drop_paths: list[str] = []
+        self.todo_bubbles: list[dict[str, object]] = []
+        self.todo_stack_height = 0
         self.chat_button_pressed = False
         self.settings_button_pressed = False
         self.quit_button_pressed = False
@@ -240,9 +254,10 @@ class DesktopMentorPet(QWidget):
         width = max(
             self.pet_size + WINDOW_PAD * 2 + rail_width + DROP_HOTZONE_PAD * 2,
             int(self.bubble_width + 12),
+            int(self.todo_bubble_width() + 12) if self.todo_bubbles else 0,
             BUBBLE_MIN_WIDTH,
         )
-        height = self.pet_size + WINDOW_PAD * 2 + int(self.bubble_height) + DROP_HOTZONE_PAD
+        height = self.pet_size + WINDOW_PAD * 2 + int(self.bubble_height) + self.todo_stack_height + DROP_HOTZONE_PAD
         return width, height
 
     def move_to_lower_right(self) -> None:
@@ -284,6 +299,8 @@ class DesktopMentorPet(QWidget):
 
     def check_idle(self) -> None:
         if time.monotonic() < self.idle_suppressed_until:
+            return
+        if self.todo_bubbles:
             return
         if any(int(todo["due_ts"]) <= int(time.time()) for todo in load_todos()):
             return
@@ -335,6 +352,66 @@ class DesktopMentorPet(QWidget):
         font.setWeight(QFont.Weight.DemiBold)
         return font
 
+    @staticmethod
+    def todo_bubble_font() -> QFont:
+        font = QFont()
+        font.setPointSize(11)
+        font.setWeight(QFont.Weight.DemiBold)
+        return font
+
+    def visible_todo_bubbles(self) -> list[dict[str, object]]:
+        return self.todo_bubbles[-TODO_BUBBLE_MAX_VISIBLE:]
+
+    def todo_bubble_width(self) -> int:
+        if not self.todo_bubbles:
+            return TODO_BUBBLE_MIN_WIDTH
+        font_metrics = QFontMetrics(self.todo_bubble_font())
+        max_width = TODO_BUBBLE_MIN_WIDTH
+        for bubble in self.visible_todo_bubbles():
+            text = self.todo_bubble_text(bubble)
+            max_width = max(max_width, min(TODO_BUBBLE_MAX_WIDTH, font_metrics.horizontalAdvance(text) + TODO_BUBBLE_TEXT_PAD_X * 2))
+        return int(max(TODO_BUBBLE_MIN_WIDTH, min(TODO_BUBBLE_MAX_WIDTH, max_width)))
+
+    def todo_bubble_text(self, bubble: dict[str, object]) -> str:
+        count = sum(1 for item in self.todo_bubbles if str(item["todo_id"]) == str(bubble["todo_id"]))
+        prefix = f"待办提醒 x{count}" if count > 1 else "待办提醒"
+        return f"{prefix}: {bubble['text']}"
+
+    def todo_bubble_rects(self) -> list[tuple[dict[str, object], QRectF]]:
+        if not self.todo_bubbles:
+            return []
+        font_metrics = QFontMetrics(self.todo_bubble_font())
+        width = min(TODO_BUBBLE_MAX_WIDTH, max(TODO_BUBBLE_MIN_WIDTH, self.todo_bubble_width()))
+        x = (self.width() - width) / 2
+        y = TODO_BUBBLE_TOP
+        rects: list[tuple[dict[str, object], QRectF]] = []
+        for bubble in self.visible_todo_bubbles():
+            text_rect = font_metrics.boundingRect(
+                0,
+                0,
+                int(width - TODO_BUBBLE_TEXT_PAD_X * 2),
+                2000,
+                int(Qt.AlignmentFlag.AlignLeft | Qt.TextFlag.TextWordWrap),
+                self.todo_bubble_text(bubble),
+            )
+            height = int(max(TODO_BUBBLE_MIN_HEIGHT, min(TODO_BUBBLE_MAX_HEIGHT, text_rect.height() + TODO_BUBBLE_TEXT_PAD_Y * 2)))
+            rect = QRectF(x, y, width, height)
+            rects.append((bubble, rect))
+            y += height + TODO_BUBBLE_GAP
+        return rects
+
+    def recalculate_todo_stack_layout(self) -> None:
+        if not self.todo_bubbles:
+            new_height = 0
+        else:
+            rects = self.todo_bubble_rects()
+            new_height = int(rects[-1][1].bottom() + TODO_BUBBLE_GAP) if rects else 0
+        if new_height == self.todo_stack_height:
+            return
+        self.todo_stack_height = new_height
+        self.resize_preserving_sticker()
+        self.keep_window_visible()
+
     def calculate_bubble_layout(self, text: str) -> tuple[int, int, int]:
         font_metrics = QFontMetrics(self.bubble_font())
         lines = str(text or "").splitlines() or [""]
@@ -371,6 +448,17 @@ class DesktopMentorPet(QWidget):
         old_center = self.sticker_center_global()
         self.resize(*self.window_dimensions())
         self.move(old_center - self.sticker_rect().center().toPoint())
+
+    def keep_window_visible(self) -> None:
+        screen = QGuiApplication.screenAt(self.sticker_center_global()) or QGuiApplication.primaryScreen()
+        if not screen:
+            return
+        area = screen.availableGeometry()
+        frame = self.frameGeometry()
+        x = min(max(frame.left(), area.left() + 4), area.right() - max(80, frame.width()) + 4)
+        y = min(max(frame.top(), area.top() + 4), area.bottom() - max(80, frame.height()) + 4)
+        if x != frame.left() or y != frame.top():
+            self.move(x, y)
 
     def apply_bubble_layout(self, text: str) -> None:
         width, body_height, height = self.calculate_bubble_layout(text)
@@ -487,6 +575,56 @@ class DesktopMentorPet(QWidget):
     def point_in_action_button(self, point: QPoint) -> bool:
         return self.point_in_chat_button(point) or self.point_in_settings_button(point) or self.point_in_quit_button(point)
 
+    def todo_id_at_point(self, point: QPoint) -> str:
+        local_point = QPointF(point)
+        for bubble, rect in self.todo_bubble_rects():
+            if rect.contains(local_point):
+                return str(bubble["todo_id"])
+        return ""
+
+    def todo_repeat_seconds(self) -> int:
+        try:
+            return max(
+                MIN_TODO_REPEAT_SECONDS,
+                min(MAX_TODO_REPEAT_SECONDS, int(self.config.todo_repeat_seconds or DEFAULT_TODO_REPEAT_SECONDS)),
+            )
+        except Exception:
+            return DEFAULT_TODO_REPEAT_SECONDS
+
+    def add_todo_bubble(self, todo: dict[str, object]) -> None:
+        self.todo_bubbles.append(
+            {
+                "todo_id": str(todo["id"]),
+                "text": compact_text(str(todo["text"]), 180),
+                "created_ts": int(time.time()),
+            }
+        )
+        self.recalculate_todo_stack_layout()
+        self.raise_()
+        self.pulse_until = time.monotonic() + 0.38
+        if not self.pulse_timer.isActive():
+            self.pulse_timer.start()
+        self.update()
+
+    def acknowledge_todo_reminder(self, todo_id: str) -> None:
+        if not todo_id:
+            return
+        self.mark_interaction()
+        todos = remove_todos_by_ids(load_todos(), [todo_id])
+        save_todos(todos)
+        self.todo_bubbles = [bubble for bubble in self.todo_bubbles if str(bubble["todo_id"]) != todo_id]
+        self.recalculate_todo_stack_layout()
+        self.idle_suppressed_until = time.monotonic() + 6.0
+        self.update()
+
+    def sync_todo_bubbles_with_store(self) -> None:
+        todo_ids = {str(todo["id"]) for todo in load_todos()}
+        if not self.todo_bubbles:
+            return
+        self.todo_bubbles = [bubble for bubble in self.todo_bubbles if str(bubble["todo_id"]) in todo_ids]
+        self.recalculate_todo_stack_layout()
+        self.update()
+
     def activate_chat_button(self) -> None:
         self.chat_button_pressed = False
         self.update()
@@ -569,6 +707,11 @@ class DesktopMentorPet(QWidget):
         self.mark_interaction()
         if event.button() == Qt.MouseButton.LeftButton:
             local_pos = as_local_pos(self, event)
+            todo_id = self.todo_id_at_point(local_pos)
+            if todo_id:
+                self.acknowledge_todo_reminder(todo_id)
+                event.accept()
+                return
             if self.point_in_chat_button(local_pos):
                 self.chat_button_pressed = True
                 self.update()
@@ -686,6 +829,11 @@ class DesktopMentorPet(QWidget):
             global_pos = as_global_pos(self, point)
 
             if event_type == QEvent.Type.TouchBegin:
+                todo_id = self.todo_id_at_point(local_pos)
+                if todo_id:
+                    self.acknowledge_todo_reminder(todo_id)
+                    event.accept()
+                    return True
                 if self.point_in_chat_button(local_pos):
                     self.chat_button_pressed = True
                     self.update()
@@ -741,8 +889,7 @@ class DesktopMentorPet(QWidget):
         return super().event(event)
 
     def open_menu(self, pos: QPoint) -> None:
-        menu = QMenu(self)
-        menu.setStyleSheet(APP_STYLESHEET)
+        menu = prepare_modern_menu(QMenu(self))
         chat = QAction("对话", self)
         todo_action = QAction("待办", self)
         settings = QAction("设置", self)
@@ -810,6 +957,9 @@ class DesktopMentorPet(QWidget):
             self.config.config_dir = str(saved_dir)
             self.config_path = saved_dir / "config.json"
             path = save_config(self.config, self.config_path)
+            if self.config_path != old_config_path:
+                self.todo_bubbles = []
+                self.recalculate_todo_stack_layout()
             if self.config.idle_mode != IDLE_MODE_FULLSCREEN and self.fullscreen_alert is not None:
                 self.fullscreen_alert.close()
             if icon_error:
@@ -823,23 +973,26 @@ class DesktopMentorPet(QWidget):
         self.position_dialog_near_pet(dialog)
         dialog.exec()
         path = save_todos(dialog.todos)
+        self.sync_todo_bubbles_with_store()
         self.show_bubble(f"待办已保存：{path}", duration=self.message_duration())
 
     def check_todos(self) -> None:
         now_ts = int(time.time())
         todos = load_todos()
-        due = [todo for todo in todos if int(todo["due_ts"]) <= now_ts]
+        due = due_todos(todos, now_ts)
         if not due:
             return
-        remaining = [todo for todo in todos if int(todo["due_ts"]) > now_ts]
+        repeat_seconds = self.todo_repeat_seconds()
+        next_due_ts = now_ts + repeat_seconds
+        remaining = future_todos(todos, now_ts)
+        for todo in due:
+            self.add_todo_bubble(todo)
+            remaining = remove_todos_by_ids(remaining, [str(todo["id"])])
+            remaining.append(rescheduled_todo(todo, next_due_ts))
         save_todos(remaining)
         if self.fullscreen_alert is not None:
             self.fullscreen_alert.close()
         self.idle_suppressed_until = time.monotonic() + max(8.0, self.message_duration() + 3.0)
-        shown = "；".join(str(todo["text"]) for todo in due[:3])
-        if len(due) > 3:
-            shown += f"；还有 {len(due) - 3} 项"
-        self.show_bubble(f"待办提醒：{shown}", duration=self.message_duration())
 
     def drop_context_hint(self) -> str:
         if not self.last_drop_context:
@@ -943,6 +1096,7 @@ class DesktopMentorPet(QWidget):
         painter.setRenderHint(QPainter.RenderHint.SmoothPixmapTransform, True)
 
         self.draw_bubble(painter)
+        self.draw_todo_bubbles(painter)
         self.draw_drop_effect(painter)
         self.draw_drag_effect(painter)
 
@@ -961,7 +1115,7 @@ class DesktopMentorPet(QWidget):
 
     def sticker_rect(self) -> QRectF:
         usable_width = max(self.pet_size, self.width() - self.action_rail_width())
-        return QRectF((usable_width - self.pet_size) / 2, self.bubble_height + 6, self.pet_size, self.pet_size)
+        return QRectF((usable_width - self.pet_size) / 2, self.todo_stack_height + self.bubble_height + 6, self.pet_size, self.pet_size)
 
     def pixmap_fit_rect(self, target: QRectF) -> QRectF:
         image_ratio = self.pixmap.width() / max(1, self.pixmap.height())
@@ -1031,7 +1185,7 @@ class DesktopMentorPet(QWidget):
         painter.setOpacity(opacity)
 
         bubble_width = min(max(BUBBLE_MIN_WIDTH, self.bubble_width), self.width() - 12)
-        body = QRectF((self.width() - bubble_width) / 2, BUBBLE_TOP, bubble_width, self.bubble_body_height)
+        body = QRectF((self.width() - bubble_width) / 2, self.todo_stack_height + BUBBLE_TOP, bubble_width, self.bubble_body_height)
         tail = QPainterPath()
         tail.moveTo(self.width() / 2 - 10, body.bottom() - 1)
         tail.lineTo(self.width() / 2, body.bottom() + 14)
@@ -1056,6 +1210,32 @@ class DesktopMentorPet(QWidget):
             Qt.AlignmentFlag.AlignCenter | Qt.TextFlag.TextWordWrap,
             self.current_message,
         )
+        painter.restore()
+
+    def draw_todo_bubbles(self, painter: QPainter) -> None:
+        rects = self.todo_bubble_rects()
+        if not rects:
+            return
+        hidden_count = max(0, len(self.todo_bubbles) - len(rects))
+        painter.save()
+        painter.setRenderHint(QPainter.RenderHint.Antialiasing, True)
+        painter.setFont(self.todo_bubble_font())
+        for index, (bubble, rect) in enumerate(rects):
+            text = self.todo_bubble_text(bubble)
+            if hidden_count and index == 0:
+                text = f"还有 {hidden_count} 次旧提醒；{text}"
+            painter.setPen(Qt.PenStyle.NoPen)
+            painter.setBrush(QColor(0, 0, 0, 74))
+            painter.drawRoundedRect(rect.translated(0, 3), 15, 15)
+            painter.setBrush(QColor(35, 48, 68, 244))
+            painter.setPen(QPen(QColor(115, 200, 255, 132), 1.2))
+            painter.drawRoundedRect(rect, 15, 15)
+            painter.setPen(QColor(238, 246, 255))
+            painter.drawText(
+                rect.adjusted(TODO_BUBBLE_TEXT_PAD_X, TODO_BUBBLE_TEXT_PAD_Y, -TODO_BUBBLE_TEXT_PAD_X, -TODO_BUBBLE_TEXT_PAD_Y),
+                Qt.AlignmentFlag.AlignLeft | Qt.AlignmentFlag.AlignVCenter | Qt.TextFlag.TextWordWrap,
+                text,
+            )
         painter.restore()
 
     def draw_action_buttons(self, painter: QPainter) -> None:

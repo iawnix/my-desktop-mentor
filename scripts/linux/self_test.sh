@@ -82,15 +82,20 @@ QT_QPA_PLATFORM=offscreen \
 DESKTOP_MENTOR_CONFIG_DIR="${DESKTOP_MENTOR_CONFIG_DIR:-/tmp/my-desktop-mentor-self-test}" \
 "$PYTHON_FOR_QT" - <<'PY'
 import time
+import os
+import tempfile
+from pathlib import Path
 
-from PySide6.QtWidgets import QApplication, QFrame, QPushButton, QScrollArea
+from PySide6.QtCore import Qt
+from PySide6.QtWidgets import QApplication, QFrame, QMenu, QPushButton, QScrollArea
 
+from desktop_mentor_app import config_store
 from desktop_mentor_app.assets import DEFAULT_IMAGE, ROOT
 from desktop_mentor_app.config_store import AgentConfig
 from desktop_mentor_app.constants import DEFAULT_CLICK_MESSAGE
 from desktop_mentor_app.drop_context import DROP_CONTEXT_PROMPT_HEADER, collect_drop_context, compose_prompt_with_drop_context
 from desktop_mentor_app.todo_store import load_todos, save_todos
-from desktop_mentor_app.ui.dialogs import ChatDialog, SettingsDialog, TodoDialog
+from desktop_mentor_app.ui.dialogs import ChatDialog, SettingsDialog, TodoDialog, prepare_modern_menu
 from desktop_mentor_app.ui.pet_widget import DesktopMentorPet
 
 app = QApplication([])
@@ -98,12 +103,22 @@ settings = SettingsDialog(AgentConfig())
 chat = ChatDialog()
 context_chat = ChatDialog(context_hint="文件上下文：README.md")
 todos = TodoDialog([])
+menu = prepare_modern_menu(QMenu())
 pet = DesktopMentorPet(DEFAULT_IMAGE, DEFAULT_CLICK_MESSAGE, 120)
+pet.config.todo_repeat_seconds = 10
 drop_context = collect_drop_context([ROOT / "README.md", ROOT / ".env", ROOT / ".git"])
 drop_prompt = compose_prompt_with_drop_context("请总结", drop_context)
 
 save_todos([{"id": "self-test", "text": "self-test todo", "due_ts": int(time.time()) - 1}])
 pet.check_todos()
+rescheduled = load_todos()
+assert len(pet.todo_bubbles) == 1, pet.todo_bubbles
+assert len(rescheduled) == 1, rescheduled
+assert str(rescheduled[0]["id"]) == "self-test"
+assert int(rescheduled[0]["due_ts"]) > int(time.time())
+save_todos([{"id": "self-test", "text": "self-test todo", "due_ts": int(time.time()) - 1}])
+pet.check_todos()
+assert len(pet.todo_bubbles) == 2, pet.todo_bubbles
 
 section_count = len([w for w in settings.findChildren(QFrame) if w.objectName() == "sectionCard"])
 scroll_count = len(settings.findChildren(QScrollArea))
@@ -111,6 +126,8 @@ nav_buttons = [w for w in settings.findChildren(QPushButton) if w.objectName().s
 assert scroll_count == 1, scroll_count
 assert section_count >= 5, section_count
 assert len(nav_buttons) == 5, len(nav_buttons)
+assert settings.windowFlags() & Qt.WindowType.FramelessWindowHint
+assert menu.testAttribute(Qt.WidgetAttribute.WA_TranslucentBackground)
 settings.scroll_to_section(2)
 assert any(button.text() == "互动" and button.objectName() == "railNavButtonActive" for button in nav_buttons)
 assert chat.text() == ""
@@ -118,12 +135,39 @@ assert context_chat.use_drop_context()
 context_chat.remove_drop_context()
 assert context_chat.drop_context_was_removed()
 assert not context_chat.use_drop_context()
+assert settings.todo_repeat_spin.value() >= 10
+assert todos.due_edit.displayFormat() == "yyyy-MM-dd HH:mm:ss"
+assert not todos.due_edit.calendarPopup()
+pet.acknowledge_todo_reminder("self-test")
 assert load_todos() == []
+assert pet.todo_bubbles == []
 assert pet.idle_suppressed_until > time.monotonic()
 assert "README.md" in drop_context
 assert "skipped sensitive filename" in drop_context
 assert "skipped generated/cache folder" in drop_context
 assert DROP_CONTEXT_PROMPT_HEADER in drop_prompt
+
+saved_env = {key: os.environ.get(key) for key in ("DESKTOP_MENTOR_CONFIG_DIR", "DESKTOP_MENTOR_CONFIG", "XDG_CONFIG_HOME")}
+with tempfile.TemporaryDirectory() as tmp:
+    os.environ.pop("DESKTOP_MENTOR_CONFIG_DIR", None)
+    os.environ.pop("DESKTOP_MENTOR_CONFIG", None)
+    os.environ["XDG_CONFIG_HOME"] = tmp
+    legacy_dir = Path(tmp) / "MyDesktopMentor"
+    legacy_dir.mkdir(parents=True)
+    (legacy_dir / "config.json").write_text("{}", encoding="utf-8")
+    pointer = config_store.config_dir_pointer_path()
+    pointer.parent.mkdir(parents=True, exist_ok=True)
+    custom_dir = Path(tmp) / "custom-config"
+    pointer.write_text(str(custom_dir), encoding="utf-8")
+    assert config_store.configured_config_dir() == legacy_dir
+    custom_dir.mkdir(parents=True)
+    (custom_dir / "config.json").write_text("{}", encoding="utf-8")
+    assert config_store.configured_config_dir() == custom_dir
+for key, value in saved_env.items():
+    if value is None:
+        os.environ.pop(key, None)
+    else:
+        os.environ[key] = value
 print("[self-test] dialog smoke ok")
 PY
 

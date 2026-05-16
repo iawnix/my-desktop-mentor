@@ -21,6 +21,7 @@ from PySide6.QtWidgets import (
     QLineEdit,
     QListWidget,
     QListWidgetItem,
+    QMenu,
     QPushButton,
     QScrollArea,
     QSpinBox,
@@ -43,12 +44,15 @@ from ..constants import (
     DEFAULT_IDLE_MESSAGE,
     DEFAULT_MESSAGE_SECONDS,
     DEFAULT_MEMORY_TURNS,
+    DEFAULT_TODO_REPEAT_SECONDS,
     FULLSCREEN_ALERT_DURATION_MS,
     IDLE_MODE_OPTIONS,
     MAX_MEMORY_TURNS,
     MAX_MESSAGE_SECONDS,
+    MAX_TODO_REPEAT_SECONDS,
     MIN_IDLE_SECONDS,
     MIN_MESSAGE_SECONDS,
+    MIN_TODO_REPEAT_SECONDS,
 )
 from ..todo_store import format_due_time, load_todos_from_items
 
@@ -58,12 +62,12 @@ APP_STYLESHEET = """
     font-family: "SF Pro Text", "Segoe UI", "Noto Sans CJK SC", "Microsoft YaHei", sans-serif;
 }
 QDialog {
-    background: #0a0f19;
+    background: transparent;
     color: #dce6f3;
     font-size: 13px;
 }
 QWidget#dialogSurface {
-    background: #0a0f19;
+    background: transparent;
 }
 QFrame#dialogShell {
     background: #101827;
@@ -71,7 +75,7 @@ QFrame#dialogShell {
     border-radius: 18px;
 }
 QFrame#titleBar {
-    background: #121d2e;
+    background: #101827;
     border-top-left-radius: 18px;
     border-top-right-radius: 18px;
     border-bottom: 1px solid #25364f;
@@ -129,22 +133,6 @@ QLabel#railTitle {
     color: #dce6f3;
     font-size: 15px;
     font-weight: 700;
-}
-QLabel#trafficRed, QLabel#trafficYellow, QLabel#trafficGreen {
-    border-radius: 5px;
-    min-width: 10px;
-    max-width: 10px;
-    min-height: 10px;
-    max-height: 10px;
-}
-QLabel#trafficRed {
-    background: #ff5f57;
-}
-QLabel#trafficYellow {
-    background: #febc2e;
-}
-QLabel#trafficGreen {
-    background: #28c840;
 }
 QLineEdit, QTextEdit, QSpinBox, QDoubleSpinBox, QDateTimeEdit, QComboBox, QListWidget {
     background: #0a111d;
@@ -259,6 +247,23 @@ QPushButton#dangerButton:hover {
     background: #4d2431;
     border-color: #a35b70;
 }
+QPushButton#titleCloseButton {
+    background: transparent;
+    border: 1px solid transparent;
+    border-radius: 9px;
+    color: #8fa3bb;
+    font-size: 15px;
+    padding: 0;
+    min-width: 28px;
+    max-width: 28px;
+    min-height: 28px;
+    max-height: 28px;
+}
+QPushButton#titleCloseButton:hover {
+    background: #263852;
+    border-color: #3e6f9e;
+    color: #edf4fb;
+}
 QDialogButtonBox QPushButton {
     min-width: 78px;
 }
@@ -304,13 +309,15 @@ QListWidget::item:selected {
     color: #ffffff;
 }
 QMenu {
-    background: #0f1725;
+    background-color: #101827;
     border: 1px solid #2a3c56;
-    border-radius: 14px;
+    border-radius: 12px;
     color: #dce6f3;
-    padding: 8px;
+    padding: 7px;
+    margin: 0;
 }
 QMenu::item {
+    background: transparent;
     border-radius: 10px;
     padding: 9px 34px 9px 14px;
 }
@@ -361,30 +368,56 @@ def style_dialog_buttons(buttons: QDialogButtonBox, primary: QDialogButtonBox.St
         mark_button(buttons.button(primary), "primaryButton")
 
 
-def traffic_dot(object_name: str) -> QLabel:
-    dot = QLabel()
-    dot.setObjectName(object_name)
-    dot.setFixedSize(10, 10)
-    return dot
+def setup_modern_dialog(dialog: QDialog) -> None:
+    dialog.setWindowFlag(Qt.WindowType.FramelessWindowHint, True)
+    dialog.setAttribute(Qt.WidgetAttribute.WA_TranslucentBackground, True)
+    dialog.setAttribute(Qt.WidgetAttribute.WA_StyledBackground, True)
+    dialog.setStyleSheet(APP_STYLESHEET)
+    dialog.setObjectName("dialogSurface")
 
 
-def title_bar(title: str) -> QFrame:
-    bar = QFrame()
-    bar.setObjectName("titleBar")
-    layout = QHBoxLayout(bar)
-    layout.setContentsMargins(16, 10, 16, 10)
-    layout.setSpacing(8)
-    layout.addWidget(traffic_dot("trafficRed"))
-    layout.addWidget(traffic_dot("trafficYellow"))
-    layout.addWidget(traffic_dot("trafficGreen"))
-    layout.addStretch(1)
-    caption = styled_label(title, "windowCaption")
-    layout.addWidget(caption)
-    layout.addStretch(1)
-    spacer = QWidget()
-    spacer.setFixedWidth(54)
-    layout.addWidget(spacer)
-    return bar
+def prepare_modern_menu(menu: QMenu) -> QMenu:
+    menu.setStyleSheet(APP_STYLESHEET)
+    menu.setAttribute(Qt.WidgetAttribute.WA_StyledBackground, True)
+    menu.setAttribute(Qt.WidgetAttribute.WA_TranslucentBackground, True)
+    menu.setWindowFlag(Qt.WindowType.NoDropShadowWindowHint, True)
+    return menu
+
+
+class DialogTitleBar(QFrame):
+    def __init__(self, title: str, owner: QDialog) -> None:
+        super().__init__(owner)
+        self.owner = owner
+        self.drag_offset = QPoint()
+        self.setObjectName("titleBar")
+        layout = QHBoxLayout(self)
+        layout.setContentsMargins(16, 9, 12, 9)
+        layout.setSpacing(8)
+        caption = styled_label(title, "windowCaption")
+        layout.addWidget(caption)
+        layout.addStretch(1)
+        close_button = QPushButton("x")
+        mark_button(close_button, "titleCloseButton")
+        close_button.clicked.connect(owner.reject)
+        layout.addWidget(close_button)
+
+    def mousePressEvent(self, event: QMouseEvent) -> None:  # type: ignore[override]
+        if event.button() == Qt.MouseButton.LeftButton:
+            self.drag_offset = event.globalPosition().toPoint() - self.owner.frameGeometry().topLeft()
+            event.accept()
+            return
+        super().mousePressEvent(event)
+
+    def mouseMoveEvent(self, event: QMouseEvent) -> None:  # type: ignore[override]
+        if event.buttons() & Qt.MouseButton.LeftButton:
+            self.owner.move(event.globalPosition().toPoint() - self.drag_offset)
+            event.accept()
+            return
+        super().mouseMoveEvent(event)
+
+
+def title_bar(title: str, owner: QDialog) -> QFrame:
+    return DialogTitleBar(title, owner)
 
 
 def section_card(title: str, content_layout: QFormLayout | QVBoxLayout, subtitle: str = "") -> QFrame:
@@ -414,8 +447,7 @@ class SettingsDialog(QDialog):
     def __init__(self, config: AgentConfig, parent: QWidget | None = None) -> None:
         super().__init__(parent)
         self.setWindowTitle(f"{APP_NAME} 设置")
-        self.setStyleSheet(APP_STYLESHEET)
-        self.setObjectName("dialogSurface")
+        setup_modern_dialog(self)
         screen = QGuiApplication.primaryScreen()
         available = screen.availableGeometry() if screen else QRect(0, 0, 1280, 720)
         self.resize(min(920, max(720, available.width() - 120)), min(780, max(520, available.height() - 120)))
@@ -468,6 +500,12 @@ class SettingsDialog(QDialog):
         self.message_seconds_spin.setValue(max(MIN_MESSAGE_SECONDS, min(MAX_MESSAGE_SECONDS, float(config.message_seconds or DEFAULT_MESSAGE_SECONDS))))
         self.message_seconds_spin.setSuffix(" s")
 
+        self.todo_repeat_spin = QSpinBox()
+        self.todo_repeat_spin.setRange(MIN_TODO_REPEAT_SECONDS, MAX_TODO_REPEAT_SECONDS)
+        self.todo_repeat_spin.setSingleStep(30)
+        self.todo_repeat_spin.setValue(max(MIN_TODO_REPEAT_SECONDS, min(MAX_TODO_REPEAT_SECONDS, int(config.todo_repeat_seconds or DEFAULT_TODO_REPEAT_SECONDS))))
+        self.todo_repeat_spin.setSuffix(" s")
+
         self.idle_spin = QSpinBox()
         self.idle_spin.setRange(MIN_IDLE_SECONDS, 86400)
         self.idle_spin.setSingleStep(10)
@@ -500,6 +538,7 @@ class SettingsDialog(QDialog):
         runtime_form.addRow("Config directory", config_dir_row)
         runtime_form.addRow("Pet image", image_row)
         runtime_form.addRow("Message duration", self.message_seconds_spin)
+        runtime_form.addRow("Todo repeat", self.todo_repeat_spin)
 
         interaction_form = modern_form_layout()
         interaction_form.addRow("Click message", self.click_message_edit)
@@ -598,7 +637,7 @@ class SettingsDialog(QDialog):
         shell_layout = QVBoxLayout(shell)
         shell_layout.setContentsMargins(0, 0, 0, 0)
         shell_layout.setSpacing(0)
-        shell_layout.addWidget(title_bar("设置"))
+        shell_layout.addWidget(title_bar("设置", self))
         shell_layout.addLayout(main, 1)
         shell_layout.addWidget(bottom_container, 0)
 
@@ -672,6 +711,7 @@ class SettingsDialog(QDialog):
             idle_message=self.idle_message_edit.text().strip() or DEFAULT_IDLE_MESSAGE,
             drop_message=self.drop_message_edit.text().strip() or DEFAULT_DROP_MESSAGE,
             message_seconds=float(self.message_seconds_spin.value()),
+            todo_repeat_seconds=int(self.todo_repeat_spin.value()),
             idle_seconds=int(self.idle_spin.value()),
             idle_mode=str(self.idle_mode_combo.currentData() or DEFAULT_IDLE_MODE),
             memory_enabled=self.memory_check.isChecked(),
@@ -684,8 +724,7 @@ class ChatDialog(QDialog):
     def __init__(self, parent: QWidget | None = None, context_hint: str = "") -> None:
         super().__init__(parent)
         self.setWindowTitle(f"问{APP_NAME}")
-        self.setStyleSheet(APP_STYLESHEET)
-        self.setObjectName("dialogSurface")
+        setup_modern_dialog(self)
         self.resize(460, 320)
         self.setMinimumSize(380, 260)
         self.context_removed = False
@@ -733,7 +772,7 @@ class ChatDialog(QDialog):
         shell_layout = QVBoxLayout(shell)
         shell_layout.setContentsMargins(0, 0, 0, 0)
         shell_layout.setSpacing(0)
-        shell_layout.addWidget(title_bar("对话"))
+        shell_layout.addWidget(title_bar("对话", self))
         content_wrap = QFrame()
         content_layout = QVBoxLayout(content_wrap)
         content_layout.setContentsMargins(14, 14, 14, 14)
@@ -768,8 +807,7 @@ class TextViewDialog(QDialog):
     def __init__(self, title: str, text: str, parent: QWidget | None = None) -> None:
         super().__init__(parent)
         self.setWindowTitle(title)
-        self.setStyleSheet(APP_STYLESHEET)
-        self.setObjectName("dialogSurface")
+        setup_modern_dialog(self)
         self.resize(620, 520)
         self.setMinimumSize(460, 360)
 
@@ -796,7 +834,7 @@ class TextViewDialog(QDialog):
         shell_layout = QVBoxLayout(shell)
         shell_layout.setContentsMargins(0, 0, 0, 0)
         shell_layout.setSpacing(0)
-        shell_layout.addWidget(title_bar(title))
+        shell_layout.addWidget(title_bar(title, self))
         content_wrap = QFrame()
         content_layout = QVBoxLayout(content_wrap)
         content_layout.setContentsMargins(14, 14, 14, 14)
@@ -813,8 +851,7 @@ class TodoDialog(QDialog):
     def __init__(self, todos: list[dict[str, object]], parent: QWidget | None = None) -> None:
         super().__init__(parent)
         self.setWindowTitle("待办提醒")
-        self.setStyleSheet(APP_STYLESHEET)
-        self.setObjectName("dialogSurface")
+        setup_modern_dialog(self)
         self.resize(620, 500)
         self.setMinimumSize(480, 380)
         self.todos = load_todos_from_items(todos)
@@ -831,7 +868,7 @@ class TodoDialog(QDialog):
         title_box.setContentsMargins(0, 0, 0, 0)
         title_box.setSpacing(2)
         title_box.addWidget(styled_label("待办", "dialogTitle"))
-        title_box.addWidget(styled_label("到点提醒一次，提醒后自动移除。", "dialogSubtitle", True))
+        title_box.addWidget(styled_label("点击提醒泡泡后移除；未点击会按设置间隔再次提醒。", "dialogSubtitle", True))
         header.addLayout(title_box, 1)
         header.addStretch(1)
 
@@ -839,8 +876,10 @@ class TodoDialog(QDialog):
         self.todo_edit.setPlaceholderText("要提醒的事情")
 
         self.due_edit = QDateTimeEdit(QDateTime.currentDateTime().addSecs(30 * 60))
-        self.due_edit.setCalendarPopup(True)
-        self.due_edit.setDisplayFormat("yyyy-MM-dd HH:mm")
+        self.due_edit.setCalendarPopup(False)
+        self.due_edit.setKeyboardTracking(True)
+        self.due_edit.setDisplayFormat("yyyy-MM-dd HH:mm:ss")
+        self.due_edit.setFixedWidth(190)
 
         add_button = QPushButton("添加")
         mark_button(add_button, "primaryButton")
@@ -888,7 +927,7 @@ class TodoDialog(QDialog):
         shell_layout = QVBoxLayout(shell)
         shell_layout.setContentsMargins(0, 0, 0, 0)
         shell_layout.setSpacing(0)
-        shell_layout.addWidget(title_bar("待办"))
+        shell_layout.addWidget(title_bar("待办", self))
         content_wrap = QFrame()
         content_layout = QVBoxLayout(content_wrap)
         content_layout.setContentsMargins(14, 14, 14, 14)

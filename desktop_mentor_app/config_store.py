@@ -20,14 +20,17 @@ from .constants import (
     DEFAULT_MESSAGE_SECONDS,
     DEFAULT_MODEL,
     DEFAULT_PERSONALITY_PROMPT,
+    DEFAULT_TODO_REPEAT_SECONDS,
     IDLE_MODE_OPTIONS,
     LEGACY_CLICK_MESSAGES,
     LEGACY_DROP_MESSAGES,
     LEGACY_IDLE_MESSAGES,
     MAX_MEMORY_TURNS,
     MAX_MESSAGE_SECONDS,
+    MAX_TODO_REPEAT_SECONDS,
     MIN_IDLE_SECONDS,
     MIN_MESSAGE_SECONDS,
+    MIN_TODO_REPEAT_SECONDS,
 )
 
 
@@ -43,6 +46,7 @@ class AgentConfig:
     idle_message: str = DEFAULT_IDLE_MESSAGE
     drop_message: str = DEFAULT_DROP_MESSAGE
     message_seconds: float = DEFAULT_MESSAGE_SECONDS
+    todo_repeat_seconds: int = DEFAULT_TODO_REPEAT_SECONDS
     idle_seconds: int = DEFAULT_IDLE_SECONDS
     idle_mode: str = DEFAULT_IDLE_MODE
     memory_enabled: bool = DEFAULT_MEMORY_ENABLED
@@ -61,8 +65,40 @@ def default_config_dir() -> Path:
     return base / APP_ID
 
 
+def legacy_config_dirs() -> list[Path]:
+    if sys.platform == "win32":
+        base = Path(os.environ.get("APPDATA", Path.home() / "AppData" / "Roaming"))
+        names = ("MyDesktopMentor", "my-desktop-mentor", "XiaoheDesktopPet", "xiaohe-desktop-pet")
+    elif sys.platform == "darwin":
+        base = Path.home() / "Library" / "Application Support"
+        names = ("MyDesktopMentor", "my-desktop-mentor", "XiaoheDesktopPet", "xiaohe-desktop-pet")
+    else:
+        base = Path(os.environ.get("XDG_CONFIG_HOME", Path.home() / ".config"))
+        names = (APP_ID, "MyDesktopMentor", "xiaohe-desktop-pet", "xiaohe-agent")
+    dirs: list[Path] = []
+    for name in names:
+        path = base / name
+        if path not in dirs:
+            dirs.append(path)
+    return dirs
+
+
 def config_dir_pointer_path() -> Path:
     return default_config_dir() / CONFIG_POINTER_NAME
+
+
+def config_file_in_dir(directory: Path) -> Path:
+    return directory.expanduser() / "config.json"
+
+
+def first_existing_config_dir() -> Path | None:
+    for directory in legacy_config_dirs():
+        try:
+            if config_file_in_dir(directory).exists():
+                return directory.expanduser()
+        except OSError:
+            continue
+    return None
 
 
 def configured_config_dir() -> Path:
@@ -75,14 +111,22 @@ def configured_config_dir() -> Path:
         return Path(override_file).expanduser().parent
 
     pointer = config_dir_pointer_path()
+    pointed_dir: Path | None = None
     try:
         if pointer.exists():
             raw_path = pointer.read_text(encoding="utf-8").strip()
             if raw_path:
-                return Path(raw_path).expanduser()
+                pointed_dir = Path(raw_path).expanduser()
+                if config_file_in_dir(pointed_dir).exists():
+                    return pointed_dir
     except OSError:
         pass
 
+    existing_dir = first_existing_config_dir()
+    if existing_dir is not None:
+        return existing_dir
+    if pointed_dir is not None:
+        return pointed_dir
     return default_config_dir()
 
 
@@ -146,6 +190,13 @@ def load_config(path: Path | None = None) -> AgentConfig:
         )
     except Exception:
         config.message_seconds = DEFAULT_MESSAGE_SECONDS
+    try:
+        config.todo_repeat_seconds = max(
+            MIN_TODO_REPEAT_SECONDS,
+            min(MAX_TODO_REPEAT_SECONDS, int(config.todo_repeat_seconds)),
+        )
+    except Exception:
+        config.todo_repeat_seconds = DEFAULT_TODO_REPEAT_SECONDS
     try:
         config.idle_seconds = max(MIN_IDLE_SECONDS, int(config.idle_seconds))
     except Exception:
