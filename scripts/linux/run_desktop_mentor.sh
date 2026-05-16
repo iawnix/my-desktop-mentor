@@ -1,23 +1,86 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
-cd "$(dirname "$0")/../.."
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+ROOT_DIR="$(cd "$SCRIPT_DIR/../.." && pwd)"
+cd "$ROOT_DIR"
+
+DIAG="${DESKTOP_MENTOR_DIAG:-0}"
+ARGS=()
+for arg in "$@"; do
+  if [[ "$arg" == "--diagnose" ]]; then
+    DIAG=1
+  else
+    ARGS+=("$arg")
+  fi
+done
+set -- "${ARGS[@]}"
+
+log() {
+  if [[ "$DIAG" == "1" || "$DIAG" == "true" || "$DIAG" == "yes" ]]; then
+    printf '[desktop-mentor] %s\n' "$*" >&2
+  fi
+}
+
+die() {
+  printf '[desktop-mentor] %s\n' "$*" >&2
+  exit 1
+}
+
+PYTHON_BIN=""
+ATTEMPTED=()
+
+python_can_run_app() {
+  local candidate="$1"
+  [[ -n "$candidate" ]] || return 1
+  ATTEMPTED+=("$candidate")
+  "$candidate" -c "from PySide6.QtCore import Qt" >/dev/null 2>&1
+}
+
+add_candidate() {
+  local candidate="$1"
+  [[ -n "$candidate" ]] || return 0
+  [[ -x "$candidate" ]] || return 0
+  CANDIDATES+=("$candidate")
+}
 
 if [[ -n "${DESKTOP_MENTOR_PYTHON:-}" ]]; then
-  PYTHON_BIN="$DESKTOP_MENTOR_PYTHON"
+  if python_can_run_app "$DESKTOP_MENTOR_PYTHON"; then
+    PYTHON_BIN="$DESKTOP_MENTOR_PYTHON"
+  else
+    die "DESKTOP_MENTOR_PYTHON cannot import PySide6.QtCore: $DESKTOP_MENTOR_PYTHON"
+  fi
 else
-  PYTHON_BIN=""
-  for candidate in python3 python; do
-    if command -v "$candidate" >/dev/null 2>&1 && "$candidate" -c "from PySide6.QtCore import Qt" >/dev/null 2>&1; then
-      PYTHON_BIN="$(command -v "$candidate")"
+  CANDIDATES=()
+  add_candidate "$ROOT_DIR/.venv/bin/python"
+  if [[ -n "${CONDA_PREFIX:-}" ]]; then
+    add_candidate "$CONDA_PREFIX/bin/python"
+  fi
+  if command -v python3 >/dev/null 2>&1; then
+    add_candidate "$(command -v python3)"
+  fi
+  if command -v python >/dev/null 2>&1; then
+    add_candidate "$(command -v python)"
+  fi
+  for candidate in "$HOME"/soft/conda/*/bin/python3 "$HOME"/miniconda*/bin/python "$HOME"/anaconda*/bin/python; do
+    add_candidate "$candidate"
+  done
+
+  for candidate in "${CANDIDATES[@]}"; do
+    if python_can_run_app "$candidate"; then
+      PYTHON_BIN="$candidate"
       break
     fi
   done
 fi
 
 if [[ -z "${PYTHON_BIN:-}" ]]; then
-  echo "No Python interpreter with PySide6.QtCore was found." >&2
-  echo "Set DESKTOP_MENTOR_PYTHON=/path/to/python or install PySide6." >&2
+  printf '[desktop-mentor] No Python interpreter with PySide6.QtCore was found.\n' >&2
+  printf '[desktop-mentor] Tried:\n' >&2
+  for candidate in "${ATTEMPTED[@]}"; do
+    printf '  - %s\n' "$candidate" >&2
+  done
+  printf '[desktop-mentor] Set DESKTOP_MENTOR_PYTHON=/path/to/python or install PySide6.\n' >&2
   exit 1
 fi
 
@@ -44,6 +107,33 @@ if [[ -z "${QT_QPA_PLATFORM:-}" ]]; then
     export WAYLAND_DISPLAY="${WAYLAND_DISPLAY:-wayland-0}"
     export QT_QPA_PLATFORM=wayland
   fi
+fi
+
+if [[ "$DIAG" == "1" || "$DIAG" == "true" || "$DIAG" == "yes" ]]; then
+  log "root: $ROOT_DIR"
+  log "python: $PYTHON_BIN"
+  "$PYTHON_BIN" - <<'PY'
+import os
+import sys
+
+try:
+    import PySide6
+    from PySide6.QtCore import qVersion
+    pyside_path = getattr(PySide6, "__file__", "")
+    qt_version = qVersion()
+except Exception as exc:
+    pyside_path = f"unavailable: {type(exc).__name__}"
+    qt_version = "unavailable"
+
+print(f"[desktop-mentor] python version: {sys.version.split()[0]}", file=sys.stderr)
+print(f"[desktop-mentor] PySide6 path: {pyside_path}", file=sys.stderr)
+print(f"[desktop-mentor] Qt version: {qt_version}", file=sys.stderr)
+print(f"[desktop-mentor] QT_QPA_PLATFORM: {os.environ.get('QT_QPA_PLATFORM', '')}", file=sys.stderr)
+print(f"[desktop-mentor] DISPLAY: {os.environ.get('DISPLAY', '')}", file=sys.stderr)
+print(f"[desktop-mentor] WAYLAND_DISPLAY: {os.environ.get('WAYLAND_DISPLAY', '')}", file=sys.stderr)
+print(f"[desktop-mentor] XDG_RUNTIME_DIR: {os.environ.get('XDG_RUNTIME_DIR', '')}", file=sys.stderr)
+print(f"[desktop-mentor] XAUTHORITY: {os.environ.get('XAUTHORITY', '')}", file=sys.stderr)
+PY
 fi
 
 exec "$PYTHON_BIN" desktop_mentor.py "$@"

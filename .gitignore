@@ -1,6 +1,8 @@
 __pycache__/
 *.py[cod]
 .venv/
+.pytest_cache/
+.mypy_cache/
 .env
 config.json
 config-dir.txt
@@ -9,6 +11,9 @@ todos.json
 icons/
 build/
 dist/
+screenshots/
+*.log
+*.tmp
 *.spec.bak
 windows-run.log
 windows-build.log

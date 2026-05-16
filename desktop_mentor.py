@@ -64,6 +64,12 @@ from PySide6.QtWidgets import (
     QWidget,
 )
 
+from desktop_mentor_app.drop_context import (
+    DROP_CONTEXT_PROMPT_HEADER,
+    collect_drop_context,
+    compose_prompt_with_drop_context,
+)
+
 
 APP_STYLESHEET = """
 * {
@@ -398,39 +404,6 @@ IDLE_MODE_OPTIONS = (
     (IDLE_MODE_FULLSCREEN, "满屏提醒"),
 )
 FULLSCREEN_ALERT_DURATION_MS = 4_200
-MAX_DROP_PATHS = 8
-MAX_FOLDER_FILES = 36
-MAX_PREVIEW_FILES_PER_FOLDER = 6
-MAX_FILE_PREVIEW_BYTES = 8192
-MAX_DROP_CONTEXT_CHARS = 24_000
-TEXT_FILE_SUFFIXES = {
-    ".bat",
-    ".c",
-    ".cc",
-    ".cfg",
-    ".conf",
-    ".cpp",
-    ".csv",
-    ".h",
-    ".hpp",
-    ".html",
-    ".ini",
-    ".java",
-    ".js",
-    ".json",
-    ".log",
-    ".md",
-    ".py",
-    ".rs",
-    ".sh",
-    ".tex",
-    ".toml",
-    ".ts",
-    ".txt",
-    ".xml",
-    ".yaml",
-    ".yml",
-}
 
 
 DEFAULT_PERSONALITY_PROMPT = """你是桌面宠物 agent「我的桌面导师」，默认形象是一位对学生友好、清晰、可靠的科研导师。
@@ -902,117 +875,6 @@ def call_agent(config: AgentConfig, user_text: str) -> str:
     return compact_text(str(content or local_agent_reply(user_text)), MAX_BUBBLE_TEXT_CHARS)
 
 
-def human_size(size: int) -> str:
-    value = float(max(0, size))
-    for unit in ("B", "KB", "MB", "GB"):
-        if value < 1024 or unit == "GB":
-            return f"{value:.1f} {unit}" if unit != "B" else f"{int(value)} B"
-        value /= 1024
-    return f"{size} B"
-
-
-def is_text_like(path: Path, sample: bytes) -> bool:
-    if path.suffix.lower() in TEXT_FILE_SUFFIXES:
-        return True
-    if b"\x00" in sample:
-        return False
-    if not sample:
-        return True
-    printable = sum(1 for byte in sample if byte in b"\n\r\t" or 32 <= byte <= 126)
-    return printable / max(1, len(sample)) > 0.78
-
-
-def read_text_preview(path: Path) -> str:
-    try:
-        with path.open("rb") as handle:
-            sample = handle.read(MAX_FILE_PREVIEW_BYTES)
-    except OSError as exc:
-        return f"[read failed: {type(exc).__name__}]"
-
-    if not is_text_like(path, sample[:2048]):
-        return "[binary file omitted]"
-
-    text = sample.decode("utf-8", errors="replace").replace("\r\n", "\n").replace("\r", "\n")
-    text = "\n".join(line.rstrip() for line in text.splitlines())
-    if len(text) > 4000:
-        text = text[:4000] + "\n[preview truncated]"
-    return text or "[empty file]"
-
-
-def describe_file(path: Path, *, base: Path | None = None) -> list[str]:
-    try:
-        stat = path.stat()
-    except OSError as exc:
-        return [f"- {path}: [stat failed: {type(exc).__name__}]"]
-
-    label = str(path)
-    if base is not None:
-        try:
-            label = str(path.relative_to(base))
-        except ValueError:
-            pass
-
-    preview = read_text_preview(path)
-    return [
-        f"- File: {label}",
-        f"  Size: {human_size(stat.st_size)}",
-        "  Preview:",
-        preview,
-    ]
-
-
-def describe_folder(path: Path) -> list[str]:
-    lines = [f"- Folder: {path}"]
-    sampled: list[Path] = []
-    seen_files = 0
-    seen_dirs = 0
-    try:
-        for child in path.rglob("*"):
-            if child.is_dir():
-                seen_dirs += 1
-                continue
-            if not child.is_file():
-                continue
-            seen_files += 1
-            if len(sampled) < MAX_FOLDER_FILES:
-                sampled.append(child)
-            if seen_files >= MAX_FOLDER_FILES:
-                break
-    except OSError as exc:
-        lines.append(f"  [scan failed: {type(exc).__name__}]")
-        return lines
-
-    lines.append(f"  Sampled files: {len(sampled)}")
-    if seen_dirs:
-        lines.append(f"  Sampled subfolders: {seen_dirs}")
-    for file_path in sampled[:MAX_PREVIEW_FILES_PER_FOLDER]:
-        lines.extend(describe_file(file_path, base=path))
-    if len(sampled) > MAX_PREVIEW_FILES_PER_FOLDER:
-        lines.append(f"  [... {len(sampled) - MAX_PREVIEW_FILES_PER_FOLDER} more sampled files omitted]")
-    return lines
-
-
-def collect_drop_context(paths: list[Path]) -> str:
-    lines = ["Dropped paths:"]
-    for path in paths[:MAX_DROP_PATHS]:
-        try:
-            if path.is_dir():
-                lines.extend(describe_folder(path))
-            elif path.is_file():
-                lines.extend(describe_file(path))
-            else:
-                lines.append(f"- {path}: [not a regular file or folder]")
-        except OSError as exc:
-            lines.append(f"- {path}: [read failed: {type(exc).__name__}]")
-    if len(paths) > MAX_DROP_PATHS:
-        lines.append(f"[... {len(paths) - MAX_DROP_PATHS} more dropped paths omitted]")
-
-    context = "\n".join(lines)
-    if len(context) > MAX_DROP_CONTEXT_CHARS:
-        context = context[:MAX_DROP_CONTEXT_CHARS] + "\n[drop context truncated]"
-    return context
-
-
 def windows_system_idle_seconds() -> float | None:
     if sys.platform != "win32":
         return None
@@ -1329,7 +1191,7 @@ class SettingsDialog(QDialog):
 
 
 class ChatDialog(QDialog):
-    def __init__(self, parent: QWidget | None = None) -> None:
+    def __init__(self, parent: QWidget | None = None, context_hint: str = "") -> None:
         super().__init__(parent)
         self.setWindowTitle(f"问{APP_NAME}")
         self.setStyleSheet(APP_STYLESHEET)
@@ -1355,6 +1217,8 @@ class ChatDialog(QDialog):
         panel_layout.setSpacing(12)
         panel_layout.addWidget(styled_label("对话", "dialogTitle"))
         panel_layout.addWidget(styled_label("把问题、目标或文件处理需求直接发给导师。", "dialogSubtitle", True))
+        if context_hint:
+            panel_layout.addWidget(styled_label(context_hint, "railItemActive", True))
         panel_layout.addWidget(self.text_edit, 1)
         panel_layout.addWidget(buttons, 0)
 
@@ -1375,6 +1239,45 @@ class ChatDialog(QDialog):
     def showEvent(self, event) -> None:  # type: ignore[override]
         super().showEvent(event)
         self.text_edit.setFocus(Qt.FocusReason.OtherFocusReason)
+
+
+class TextViewDialog(QDialog):
+    def __init__(self, title: str, text: str, parent: QWidget | None = None) -> None:
+        super().__init__(parent)
+        self.setWindowTitle(title)
+        self.setStyleSheet(APP_STYLESHEET)
+        self.setObjectName("dialogSurface")
+        self.resize(620, 520)
+        self.setMinimumSize(460, 360)
+
+        text_view = QTextEdit()
+        text_view.setReadOnly(True)
+        text_view.setPlainText(text)
+
+        buttons = QDialogButtonBox(QDialogButtonBox.StandardButton.Close)
+        buttons.button(QDialogButtonBox.StandardButton.Close).setText("关闭")
+        style_dialog_buttons(buttons)
+        buttons.rejected.connect(self.reject)
+
+        panel = QFrame()
+        panel.setObjectName("glassPanel")
+        panel_layout = QVBoxLayout(panel)
+        panel_layout.setContentsMargins(16, 15, 16, 16)
+        panel_layout.setSpacing(12)
+        panel_layout.addWidget(styled_label(title, "dialogTitle"))
+        panel_layout.addWidget(text_view, 1)
+        panel_layout.addWidget(buttons, 0)
+
+        shell = QFrame()
+        shell.setObjectName("dialogShell")
+        shell_layout = QVBoxLayout(shell)
+        shell_layout.setContentsMargins(14, 14, 14, 14)
+        shell_layout.addWidget(panel)
+
+        layout = QVBoxLayout(self)
+        layout.setContentsMargins(10, 10, 10, 10)
+        layout.setSpacing(0)
+        layout.addWidget(shell)
 
 
 class TodoDialog(QDialog):
@@ -2018,7 +1921,7 @@ class DesktopMentorPet(QWidget):
         self.unsetCursor()
         self.last_drop_paths = [str(path) for path in paths]
         self.last_drop_context = collect_drop_context(paths)
-        self.show_bubble(self.config.drop_message or DEFAULT_DROP_MESSAGE, duration=self.message_duration())
+        self.show_bubble(f"{self.config.drop_message or DEFAULT_DROP_MESSAGE} 下次对话会带上这些上下文。", duration=self.message_duration())
         event.acceptProposedAction()
 
     def mousePressEvent(self, event: QMouseEvent) -> None:  # type: ignore[override]
@@ -2203,6 +2106,9 @@ class DesktopMentorPet(QWidget):
         todo_action = QAction("待办", self)
         settings = QAction("设置", self)
         quit_action = QAction("退出", self)
+        ask_files = QAction("只问文件", self)
+        show_files = QAction("文件摘要", self)
+        clear_files = QAction("清除文件上下文", self)
         bigger = QAction("放大", self)
         smaller = QAction("缩小", self)
         reset = QAction("回到右下角", self)
@@ -2210,6 +2116,9 @@ class DesktopMentorPet(QWidget):
         todo_action.triggered.connect(self.open_todos)
         settings.triggered.connect(self.open_settings)
         quit_action.triggered.connect(QApplication.quit)
+        ask_files.triggered.connect(self.ask_about_dropped_files)
+        show_files.triggered.connect(self.open_drop_summary)
+        clear_files.triggered.connect(self.clear_drop_context)
         bigger.triggered.connect(lambda: self.set_pet_size(self.pet_size + 28))
         smaller.triggered.connect(lambda: self.set_pet_size(self.pet_size - 28))
         reset.triggered.connect(self.move_to_lower_right)
@@ -2217,6 +2126,11 @@ class DesktopMentorPet(QWidget):
         menu.addAction(settings)
         menu.addAction(todo_action)
         menu.addAction(quit_action)
+        if self.last_drop_context:
+            menu.addSeparator()
+            menu.addAction(ask_files)
+            menu.addAction(show_files)
+            menu.addAction(clear_files)
         menu.addSeparator()
         menu.addAction(bigger)
         menu.addAction(smaller)
@@ -2286,18 +2200,51 @@ class DesktopMentorPet(QWidget):
             shown += f"；还有 {len(due) - 3} 项"
         self.show_bubble(f"待办提醒：{shown}", duration=self.message_duration())
 
+    def drop_context_hint(self) -> str:
+        if not self.last_drop_context:
+            return ""
+        count = len(self.last_drop_paths)
+        return f"已附加最近拖入的 {count} 个文件/文件夹上下文。"
+
     def open_chat(self) -> None:
         self.mark_interaction()
-        dialog = ChatDialog(self)
+        dialog = ChatDialog(self, self.drop_context_hint())
         self.position_dialog_near_pet(dialog)
         if dialog.exec() != QDialog.DialogCode.Accepted:
             return
-        prompt = dialog.text()
-        if not prompt:
+        user_prompt = dialog.text()
+        if not user_prompt:
             return
+        prompt = compose_prompt_with_drop_context(user_prompt, self.last_drop_context)
         self.show_bubble("导师处理中。", duration=min(1.8, self.message_duration()))
-        thread = threading.Thread(target=self.fetch_agent_reply, args=(prompt,), daemon=True)
+        thread = threading.Thread(target=self.fetch_agent_reply, args=(prompt, user_prompt), daemon=True)
         thread.start()
+
+    def ask_about_dropped_files(self) -> None:
+        self.mark_interaction()
+        if not self.last_drop_context:
+            self.show_bubble("还没有拖入文件。", duration=self.message_duration())
+            return
+        user_prompt = "请先概括这些文件/文件夹的内容，再指出最值得我下一步处理的事项。"
+        prompt = compose_prompt_with_drop_context(user_prompt, self.last_drop_context)
+        self.show_bubble("导师正在看文件。", duration=min(1.8, self.message_duration()))
+        thread = threading.Thread(target=self.fetch_agent_reply, args=(prompt, "只问文件"), daemon=True)
+        thread.start()
+
+    def open_drop_summary(self) -> None:
+        self.mark_interaction()
+        if not self.last_drop_context:
+            self.show_bubble("还没有拖入文件。", duration=self.message_duration())
+            return
+        dialog = TextViewDialog("文件摘要", self.last_drop_context, self)
+        self.position_dialog_near_pet(dialog)
+        dialog.exec()
+
+    def clear_drop_context(self) -> None:
+        self.mark_interaction()
+        self.last_drop_paths = []
+        self.last_drop_context = ""
+        self.show_bubble("文件上下文已清除。", duration=self.message_duration())
 
     def position_dialog_near_pet(self, dialog: QDialog) -> None:
         dialog.adjustSize()
@@ -2321,11 +2268,11 @@ class DesktopMentorPet(QWidget):
         y = min(max(candidates[0].y(), area.top() + margin), area.bottom() - size.height() - margin)
         dialog.move(x, y)
 
-    def fetch_agent_reply(self, prompt: str) -> None:
+    def fetch_agent_reply(self, prompt: str, memory_prompt: str | None = None) -> None:
         reply = call_agent(self.config, prompt)
         if self.config.memory_enabled:
             try:
-                append_memory_turn(prompt, reply)
+                append_memory_turn(memory_prompt or prompt, reply)
             except Exception:
                 pass
         self.agent_signals.reply_ready.emit(reply)
