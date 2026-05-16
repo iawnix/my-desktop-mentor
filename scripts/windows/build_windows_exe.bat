@@ -31,6 +31,11 @@ if errorlevel 1 goto build_failed
 %PYTHON_CMD% -m pip install -r packaging\windows\requirements-windows.txt >> "%LOG%" 2>&1
 if errorlevel 1 goto build_failed
 
+echo Generating Windows icon from assets\default_mentor.png...
+echo Generating Windows icon from assets\default_mentor.png... >> "%LOG%"
+%PYTHON_CMD% desktop_mentor.py --ensure-default-icon --force-icon >> "%LOG%" 2>&1
+if errorlevel 1 goto build_failed
+
 if exist build rmdir /s /q build
 if exist dist rmdir /s /q dist
 

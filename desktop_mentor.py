@@ -8,11 +8,13 @@ from __future__ import annotations
 
 import argparse
 import ctypes
+import hashlib
 import json
 import math
 import os
 import re
 import shutil
+import struct
 import subprocess
 import sys
 import threading
@@ -22,12 +24,14 @@ import urllib.request
 from dataclasses import asdict, dataclass
 from pathlib import Path
 
-from PySide6.QtCore import QObject, QPoint, QPointF, QRect, QRectF, QTimer, Qt, QEvent, Signal
+from PySide6.QtCore import QByteArray, QBuffer, QIODevice, QObject, QPoint, QPointF, QRect, QRectF, QTimer, Qt, QEvent, Signal
 from PySide6.QtGui import (
     QAction,
     QColor,
     QFont,
     QGuiApplication,
+    QIcon,
+    QImage,
     QMouseEvent,
     QPainter,
     QPainterPath,
@@ -42,7 +46,6 @@ from PySide6.QtWidgets import (
     QFileDialog,
     QFormLayout,
     QHBoxLayout,
-    QInputDialog,
     QLabel,
     QLineEdit,
     QMenu,
@@ -55,6 +58,73 @@ from PySide6.QtWidgets import (
 )
 
 
+APP_STYLESHEET = """
+QDialog {
+    background: #111827;
+    color: #e5e7eb;
+    font-size: 13px;
+}
+QLabel {
+    color: #d1d5db;
+}
+QLineEdit, QTextEdit, QSpinBox, QComboBox {
+    background: #0b1220;
+    border: 1px solid #334155;
+    border-radius: 8px;
+    color: #f8fafc;
+    padding: 8px 10px;
+    selection-background-color: #2563eb;
+}
+QLineEdit:focus, QTextEdit:focus, QSpinBox:focus, QComboBox:focus {
+    border-color: #60a5fa;
+}
+QTextEdit {
+    padding: 10px;
+}
+QPushButton {
+    background: #1f2937;
+    border: 1px solid #3b4758;
+    border-radius: 8px;
+    color: #f8fafc;
+    padding: 8px 14px;
+}
+QPushButton:hover {
+    background: #263449;
+    border-color: #60a5fa;
+}
+QPushButton:pressed {
+    background: #1d4ed8;
+}
+QDialogButtonBox QPushButton {
+    min-width: 76px;
+}
+QComboBox::drop-down {
+    border: 0;
+    width: 24px;
+}
+QMenu {
+    background: #0f172a;
+    border: 1px solid #334155;
+    border-radius: 10px;
+    color: #e5e7eb;
+    padding: 8px;
+}
+QMenu::item {
+    border-radius: 7px;
+    padding: 8px 28px 8px 12px;
+}
+QMenu::item:selected {
+    background: #2563eb;
+    color: #ffffff;
+}
+QMenu::separator {
+    height: 1px;
+    background: #263244;
+    margin: 6px 8px;
+}
+"""
+
+
 def app_root() -> Path:
     bundle_root = getattr(sys, "_MEIPASS", "")
     if bundle_root:
@@ -65,9 +135,11 @@ def app_root() -> Path:
 ROOT = app_root()
 APP_NAME = "我的桌面导师"
 DEFAULT_IMAGE = ROOT / "assets" / "default_mentor.png"
+DEFAULT_ICON = ROOT / "assets" / "desktop_mentor.ico"
 DEFAULT_CLICK_MESSAGE = "抓紧, 谢谢!"
 DEFAULT_IDLE_MESSAGE = "课题如何了? 抓紧谢谢!"
 DEFAULT_DROP_MESSAGE = "这种垃圾就不要让我看, 我每天很忙的!"
+ICON_SIZES = (16, 24, 32, 48, 64, 128, 256)
 BUBBLE_MIN_HEIGHT = 88
 BUBBLE_TOP = 7
 BUBBLE_TAIL_HEIGHT = 16
@@ -81,6 +153,11 @@ BUBBLE_TEXT_PAD_Y = 10
 MAX_BUBBLE_TEXT_CHARS = 520
 CHAT_BUTTON_MIN_SIZE = 30
 CHAT_BUTTON_MAX_SIZE = 44
+ACTION_BUTTON_MIN_SIZE = 32
+ACTION_BUTTON_MAX_SIZE = 42
+ACTION_BUTTON_GAP = 8
+ACTION_BUTTON_STICKER_GAP = 9
+ACTION_BUTTON_OUTER_PAD = 8
 CHAT_BUTTON_MARGIN = 4
 WINDOW_PAD = 15
 APP_ID = "my-desktop-mentor"
@@ -157,6 +234,7 @@ class AgentConfig:
     api_key: str = ""
     model: str = DEFAULT_MODEL
     image_path: str = ""
+    icon_path: str = ""
     click_message: str = DEFAULT_CLICK_MESSAGE
     idle_message: str = DEFAULT_IDLE_MESSAGE
     idle_seconds: int = DEFAULT_IDLE_SECONDS
@@ -276,6 +354,90 @@ def save_config(config: AgentConfig, path: Path | None = None) -> Path:
     target.parent.mkdir(parents=True, exist_ok=True)
     target.write_text(json.dumps(asdict(config), ensure_ascii=False, indent=2), encoding="utf-8")
     return target
+
+
+def file_digest(path: Path) -> str:
+    digest = hashlib.sha256()
+    with path.open("rb") as handle:
+        for chunk in iter(lambda: handle.read(1024 * 1024), b""):
+            digest.update(chunk)
+    return digest.hexdigest()
+
+
+def safe_stem(path: Path) -> str:
+    stem = re.sub(r"[^A-Za-z0-9_.-]+", "-", path.stem).strip(".-")
+    return (stem or "mentor")[:48]
+
+
+def icon_cache_path_for_image(image_path: Path) -> Path:
+    source = image_path.expanduser().resolve()
+    digest = file_digest(source)[:16]
+    return config_path().parent / "icons" / f"{safe_stem(source)}-{digest}.ico"
+
+
+def qimage_png_bytes(image: QImage) -> bytes:
+    data = QByteArray()
+    buffer = QBuffer(data)
+    if not buffer.open(QIODevice.OpenModeFlag.WriteOnly):
+        raise RuntimeError("failed to open PNG buffer")
+    if not image.save(buffer, "PNG"):
+        raise RuntimeError("failed to encode PNG icon layer")
+    buffer.close()
+    return bytes(data)
+
+
+def centered_icon_layer(source: QImage, size: int) -> QImage:
+    canvas = QImage(size, size, QImage.Format.Format_ARGB32)
+    canvas.fill(Qt.GlobalColor.transparent)
+    scaled = source.scaled(size, size, Qt.AspectRatioMode.KeepAspectRatio, Qt.TransformationMode.SmoothTransformation)
+    painter = QPainter(canvas)
+    painter.drawImage((size - scaled.width()) // 2, (size - scaled.height()) // 2, scaled)
+    painter.end()
+    return canvas
+
+
+def write_ico(layers: list[tuple[int, bytes]], output_path: Path) -> Path:
+    if not layers:
+        raise RuntimeError("no icon layers to write")
+    output_path = output_path.expanduser().resolve()
+    output_path.parent.mkdir(parents=True, exist_ok=True)
+
+    offset = 6 + 16 * len(layers)
+    directory = bytearray()
+    payload = bytearray()
+    for size, data in layers:
+        width_byte = 0 if size >= 256 else size
+        height_byte = 0 if size >= 256 else size
+        directory.extend(struct.pack("<BBBBHHII", width_byte, height_byte, 0, 0, 1, 32, len(data), offset))
+        payload.extend(data)
+        offset += len(data)
+
+    output_path.write_bytes(struct.pack("<HHH", 0, 1, len(layers)) + bytes(directory) + bytes(payload))
+    return output_path
+
+
+def convert_image_to_ico(image_path: Path, output_path: Path, *, force: bool = True) -> Path:
+    source = image_path.expanduser().resolve()
+    target = output_path.expanduser().resolve()
+    if not source.exists():
+        raise RuntimeError(f"source image does not exist: {source}")
+    if target.exists() and not force:
+        try:
+            if target.stat().st_mtime >= source.stat().st_mtime and target.stat().st_size > 0:
+                return target
+        except OSError:
+            pass
+
+    image = QImage(str(source))
+    if image.isNull():
+        raise RuntimeError(f"failed to load source image: {source}")
+
+    layers = [(size, qimage_png_bytes(centered_icon_layer(image, size))) for size in ICON_SIZES]
+    return write_ico(layers, target)
+
+
+def ensure_default_icon(*, force: bool = False) -> Path:
+    return convert_image_to_ico(DEFAULT_IMAGE, DEFAULT_ICON, force=force)
 
 
 def normalize_chat_url(raw_url: str) -> str:
@@ -554,7 +716,8 @@ class SettingsDialog(QDialog):
     def __init__(self, config: AgentConfig, parent: QWidget | None = None) -> None:
         super().__init__(parent)
         self.setWindowTitle(f"{APP_NAME} 设置")
-        self.resize(620, 660)
+        self.setStyleSheet(APP_STYLESHEET)
+        self.resize(680, 720)
 
         self.url_edit = QLineEdit(config.api_url)
         self.url_edit.setPlaceholderText("OpenAI-compatible base URL, e.g. http://127.0.0.1:8000")
@@ -566,7 +729,7 @@ class SettingsDialog(QDialog):
         self.model_edit = QLineEdit(config.model or DEFAULT_MODEL)
 
         self.image_edit = QLineEdit(config.image_path or str(DEFAULT_IMAGE))
-        self.image_edit.setPlaceholderText("PNG/JPG image path")
+        self.image_edit.setPlaceholderText("PNG/JPG image path; PNG will be converted to ICO")
         image_button = QPushButton("选择")
         image_button.clicked.connect(self.browse_image)
         image_row = QHBoxLayout()
@@ -594,7 +757,19 @@ class SettingsDialog(QDialog):
         self.prompt_edit = QTextEdit(config.system_prompt or DEFAULT_PERSONALITY_PROMPT)
         self.prompt_edit.setMinimumHeight(220)
 
+        title = QLabel("Agent 设置")
+        title_font = QFont()
+        title_font.setPointSize(18)
+        title_font.setWeight(QFont.Weight.Bold)
+        title.setFont(title_font)
+        subtitle = QLabel("配置 agent 接口、桌宠形象、交互话术和空闲提醒。")
+        subtitle.setWordWrap(True)
+
         form = QFormLayout()
+        form.setLabelAlignment(Qt.AlignmentFlag.AlignRight)
+        form.setFormAlignment(Qt.AlignmentFlag.AlignTop)
+        form.setHorizontalSpacing(14)
+        form.setVerticalSpacing(12)
         form.addRow("Agent URL", self.url_edit)
         form.addRow("API Key", self.key_edit)
         form.addRow("Model", self.model_edit)
@@ -608,8 +783,10 @@ class SettingsDialog(QDialog):
         reset_prompt = QPushButton("恢复默认人格")
         reset_prompt.clicked.connect(lambda: self.prompt_edit.setPlainText(DEFAULT_PERSONALITY_PROMPT))
 
-        hint = QLabel("配置保存在当前系统用户配置目录，不写入项目仓库。URL 按 OpenAI-compatible /v1/chat/completions 调用。")
+        hint = QLabel("配置保存在当前系统用户配置目录，不写入项目仓库。PNG 形象会自动生成 ICO。URL 按 OpenAI-compatible /v1/chat/completions 调用。")
         hint.setWordWrap(True)
+        hint.setObjectName("hint")
+        hint.setStyleSheet("#hint { color: #94a3b8; background: #0b1220; border: 1px solid #1f2a3a; border-radius: 8px; padding: 10px; }")
 
         buttons = QDialogButtonBox(QDialogButtonBox.StandardButton.Save | QDialogButtonBox.StandardButton.Cancel)
         buttons.accepted.connect(self.accept)
@@ -621,6 +798,10 @@ class SettingsDialog(QDialog):
         bottom.addWidget(buttons)
 
         layout = QVBoxLayout(self)
+        layout.setContentsMargins(22, 20, 22, 20)
+        layout.setSpacing(14)
+        layout.addWidget(title)
+        layout.addWidget(subtitle)
         layout.addWidget(hint)
         layout.addLayout(form)
         layout.addLayout(bottom)
@@ -660,6 +841,37 @@ class SettingsDialog(QDialog):
             idle_mode=str(self.idle_mode_combo.currentData() or DEFAULT_IDLE_MODE),
             system_prompt=self.prompt_edit.toPlainText().strip() or DEFAULT_PERSONALITY_PROMPT,
         )
+
+
+class ChatDialog(QDialog):
+    def __init__(self, parent: QWidget | None = None) -> None:
+        super().__init__(parent)
+        self.setWindowTitle(f"问{APP_NAME}")
+        self.setStyleSheet(APP_STYLESHEET)
+        self.resize(420, 260)
+
+        self.text_edit = QTextEdit()
+        self.text_edit.setPlaceholderText("你要问什么")
+        self.text_edit.setMinimumHeight(150)
+
+        buttons = QDialogButtonBox(QDialogButtonBox.StandardButton.Ok | QDialogButtonBox.StandardButton.Cancel)
+        buttons.button(QDialogButtonBox.StandardButton.Ok).setText("发送")
+        buttons.button(QDialogButtonBox.StandardButton.Cancel).setText("取消")
+        buttons.accepted.connect(self.accept)
+        buttons.rejected.connect(self.reject)
+
+        layout = QVBoxLayout(self)
+        layout.setContentsMargins(18, 18, 18, 18)
+        layout.setSpacing(12)
+        layout.addWidget(self.text_edit)
+        layout.addWidget(buttons)
+
+    def text(self) -> str:
+        return self.text_edit.toPlainText().strip()
+
+    def showEvent(self, event) -> None:  # type: ignore[override]
+        super().showEvent(event)
+        self.text_edit.setFocus(Qt.FocusReason.OtherFocusReason)
 
 
 class FullScreenIdleAlert(QWidget):
@@ -771,6 +983,7 @@ class DesktopMentorPet(QWidget):
             self.pixmap = fallback_pixmap
             self.config.image_path = str(image_path)
         self.fullscreen_alert: FullScreenIdleAlert | None = None
+        self.icon_error = self.refresh_window_icon()
 
         self.dragging = False
         self.drag_offset = QPoint()
@@ -782,6 +995,7 @@ class DesktopMentorPet(QWidget):
         self.last_drop_context = ""
         self.last_drop_paths: list[str] = []
         self.chat_button_pressed = False
+        self.settings_button_pressed = False
         self.pulse_until = 0.0
         self.message_until = 0.0
         self.last_interaction = time.monotonic()
@@ -826,8 +1040,32 @@ class DesktopMentorPet(QWidget):
         self.update()
         return True
 
+    def refresh_window_icon(self) -> str:
+        try:
+            if self.image_path.suffix.lower() == ".png":
+                default_source = self.image_path == DEFAULT_IMAGE.expanduser().resolve()
+                icon_path = ensure_default_icon() if default_source else convert_image_to_ico(
+                    self.image_path,
+                    icon_cache_path_for_image(self.image_path),
+                    force=False,
+                )
+                self.config.icon_path = str(icon_path)
+                self.setWindowIcon(QIcon(str(icon_path)))
+                return ""
+
+            raw_icon = str(self.config.icon_path or "").strip()
+            if raw_icon and Path(raw_icon).expanduser().exists():
+                self.setWindowIcon(QIcon(str(Path(raw_icon).expanduser())))
+                return ""
+            self.config.icon_path = ""
+            return ""
+        except Exception as exc:
+            self.config.icon_path = ""
+            return f"{type(exc).__name__}: {exc}"
+
     def window_dimensions(self) -> tuple[int, int]:
-        width = max(self.pet_size + WINDOW_PAD * 2, int(self.bubble_width + 12), BUBBLE_MIN_WIDTH)
+        rail_width = self.action_rail_width()
+        width = max(self.pet_size + WINDOW_PAD * 2 + rail_width, int(self.bubble_width + 12), BUBBLE_MIN_WIDTH)
         height = self.pet_size + WINDOW_PAD * 2 + int(self.bubble_height)
         return width, height
 
@@ -1006,23 +1244,47 @@ class DesktopMentorPet(QWidget):
         self.drag_follow_timer.stop()
         self.touch_menu_timer.stop()
 
-    def chat_button_rect(self) -> QRectF:
+    def action_button_size(self) -> int:
+        return max(ACTION_BUTTON_MIN_SIZE, min(ACTION_BUTTON_MAX_SIZE, int(self.pet_size * 0.24)))
+
+    def action_rail_width(self) -> int:
+        return self.action_button_size() + ACTION_BUTTON_STICKER_GAP + ACTION_BUTTON_OUTER_PAD
+
+    def action_button_rects(self) -> tuple[QRectF, QRectF]:
         sticker = self.sticker_rect()
-        size = max(CHAT_BUTTON_MIN_SIZE, min(CHAT_BUTTON_MAX_SIZE, int(self.pet_size * 0.24)))
-        return QRectF(
-            sticker.right() - size - CHAT_BUTTON_MARGIN,
-            sticker.bottom() - size - CHAT_BUTTON_MARGIN,
-            size,
-            size,
-        )
+        size = self.action_button_size()
+        total_height = size * 2 + ACTION_BUTTON_GAP
+        x = sticker.right() + ACTION_BUTTON_STICKER_GAP
+        y = sticker.bottom() - total_height - ACTION_BUTTON_OUTER_PAD
+        y = max(sticker.top() + ACTION_BUTTON_OUTER_PAD, min(y, sticker.bottom() - total_height - ACTION_BUTTON_OUTER_PAD))
+        settings = QRectF(x, y, size, size)
+        chat = QRectF(x, y + size + ACTION_BUTTON_GAP, size, size)
+        return settings, chat
+
+    def settings_button_rect(self) -> QRectF:
+        return self.action_button_rects()[0]
+
+    def chat_button_rect(self) -> QRectF:
+        return self.action_button_rects()[1]
 
     def point_in_chat_button(self, point: QPoint) -> bool:
         return self.chat_button_rect().contains(QPointF(point))
+
+    def point_in_settings_button(self, point: QPoint) -> bool:
+        return self.settings_button_rect().contains(QPointF(point))
+
+    def point_in_action_button(self, point: QPoint) -> bool:
+        return self.point_in_settings_button(point) or self.point_in_chat_button(point)
 
     def activate_chat_button(self) -> None:
         self.chat_button_pressed = False
         self.update()
         self.open_chat()
+
+    def activate_settings_button(self) -> None:
+        self.settings_button_pressed = False
+        self.update()
+        self.open_settings()
 
     def open_touch_menu(self) -> None:
         if not self.touch_dragging:
@@ -1072,7 +1334,13 @@ class DesktopMentorPet(QWidget):
     def mousePressEvent(self, event: QMouseEvent) -> None:  # type: ignore[override]
         self.mark_interaction()
         if event.button() == Qt.MouseButton.LeftButton:
-            if self.point_in_chat_button(as_local_pos(self, event)):
+            local_pos = as_local_pos(self, event)
+            if self.point_in_settings_button(local_pos):
+                self.settings_button_pressed = True
+                self.update()
+                event.accept()
+                return
+            if self.point_in_chat_button(local_pos):
                 self.chat_button_pressed = True
                 self.update()
                 event.accept()
@@ -1088,6 +1356,11 @@ class DesktopMentorPet(QWidget):
 
     def mouseMoveEvent(self, event: QMouseEvent) -> None:  # type: ignore[override]
         local_pos = as_local_pos(self, event)
+        if self.settings_button_pressed:
+            self.settings_button_pressed = self.point_in_settings_button(local_pos)
+            self.update()
+            event.accept()
+            return
         if self.chat_button_pressed:
             self.chat_button_pressed = self.point_in_chat_button(local_pos)
             self.update()
@@ -1104,13 +1377,21 @@ class DesktopMentorPet(QWidget):
         if self.dragging and self.touch_dragging:
             event.accept()
             return
-        if self.point_in_chat_button(local_pos):
+        if self.point_in_action_button(local_pos):
             self.setCursor(Qt.CursorShape.PointingHandCursor)
         else:
             self.unsetCursor()
         super().mouseMoveEvent(event)
 
     def mouseReleaseEvent(self, event: QMouseEvent) -> None:  # type: ignore[override]
+        if event.button() == Qt.MouseButton.LeftButton and self.settings_button_pressed:
+            if self.point_in_settings_button(as_local_pos(self, event)):
+                self.activate_settings_button()
+            else:
+                self.settings_button_pressed = False
+                self.update()
+            event.accept()
+            return
         if event.button() == Qt.MouseButton.LeftButton and self.chat_button_pressed:
             if self.point_in_chat_button(as_local_pos(self, event)):
                 self.activate_chat_button()
@@ -1131,7 +1412,7 @@ class DesktopMentorPet(QWidget):
 
     def leaveEvent(self, _event) -> None:  # type: ignore[override]
         self.hovering = False
-        if not self.chat_button_pressed:
+        if not self.chat_button_pressed and not self.settings_button_pressed:
             self.unsetCursor()
         self.update()
 
@@ -1151,15 +1432,29 @@ class DesktopMentorPet(QWidget):
             global_pos = as_global_pos(self, point)
 
             if event_type == QEvent.Type.TouchBegin:
+                if self.point_in_settings_button(local_pos):
+                    self.settings_button_pressed = True
+                    self.update()
+                    event.accept()
+                    return True
                 if self.point_in_chat_button(local_pos):
                     self.chat_button_pressed = True
                     self.update()
                     event.accept()
                     return True
                 self.begin_drag(global_pos, touch=True)
+            elif event_type == QEvent.Type.TouchUpdate and self.settings_button_pressed:
+                self.settings_button_pressed = self.point_in_settings_button(local_pos)
+                self.update()
             elif event_type == QEvent.Type.TouchUpdate and self.chat_button_pressed:
                 self.chat_button_pressed = self.point_in_chat_button(local_pos)
                 self.update()
+            elif event_type == QEvent.Type.TouchEnd and self.settings_button_pressed:
+                if self.point_in_settings_button(local_pos):
+                    self.activate_settings_button()
+                else:
+                    self.settings_button_pressed = False
+                    self.update()
             elif event_type == QEvent.Type.TouchEnd and self.chat_button_pressed:
                 if self.point_in_chat_button(local_pos):
                     self.activate_chat_button()
@@ -1169,6 +1464,7 @@ class DesktopMentorPet(QWidget):
             elif event_type == QEvent.Type.TouchUpdate and self.touch_dragging:
                 self.move_from_pointer(global_pos)
             else:
+                self.settings_button_pressed = False
                 self.chat_button_pressed = False
                 self.end_drag()
             event.accept()
@@ -1177,6 +1473,7 @@ class DesktopMentorPet(QWidget):
 
     def open_menu(self, pos: QPoint) -> None:
         menu = QMenu(self)
+        menu.setStyleSheet(APP_STYLESHEET)
         settings = QAction("Agent 设置", self)
         chat = QAction("对话", self)
         bigger = QAction("放大", self)
@@ -1215,20 +1512,49 @@ class DesktopMentorPet(QWidget):
                 self.pixmap = old_pixmap
                 self.show_bubble("形象文件加载失败，设置未保存。", duration=2.8)
                 return
+            icon_error = self.refresh_window_icon()
             path = save_config(self.config, self.config_path)
             if self.config.idle_mode != IDLE_MODE_FULLSCREEN and self.fullscreen_alert is not None:
                 self.fullscreen_alert.close()
-            self.show_bubble(f"设置已保存：{path}", duration=2.6)
+            if icon_error:
+                self.show_bubble(f"设置已保存，但 ICO 生成失败：{icon_error}", duration=3.4)
+            else:
+                self.show_bubble(f"设置已保存：{path}", duration=2.6)
 
     def open_chat(self) -> None:
         self.mark_interaction()
-        text, ok = QInputDialog.getMultiLineText(self, f"问{APP_NAME}", "你要问什么：", "")
-        if not ok or not text.strip():
+        dialog = ChatDialog(self)
+        self.position_dialog_near_pet(dialog)
+        if dialog.exec() != QDialog.DialogCode.Accepted:
+            return
+        prompt = dialog.text()
+        if not prompt:
             return
         self.show_bubble("导师处理中，抓紧等。", duration=1.8)
-        prompt = text.strip()
         thread = threading.Thread(target=self.fetch_agent_reply, args=(prompt,), daemon=True)
         thread.start()
+
+    def position_dialog_near_pet(self, dialog: QDialog) -> None:
+        dialog.adjustSize()
+        size = dialog.size()
+        screen = QGuiApplication.screenAt(self.sticker_center_global()) or QGuiApplication.primaryScreen()
+        area = screen.availableGeometry() if screen else QRect(0, 0, 1280, 720)
+        frame = self.frameGeometry()
+        margin = 14
+        candidates = [
+            QPoint(frame.left() - size.width() - margin, frame.top() + max(0, (frame.height() - size.height()) // 2)),
+            QPoint(frame.right() + margin, frame.top() + max(0, (frame.height() - size.height()) // 2)),
+            QPoint(frame.left() + max(0, (frame.width() - size.width()) // 2), frame.top() - size.height() - margin),
+            QPoint(frame.left() + max(0, (frame.width() - size.width()) // 2), frame.bottom() + margin),
+        ]
+        for candidate in candidates:
+            rect = QRect(candidate, size)
+            if area.contains(rect):
+                dialog.move(candidate)
+                return
+        x = min(max(candidates[0].x(), area.left() + margin), area.right() - size.width() - margin)
+        y = min(max(candidates[0].y(), area.top() + margin), area.bottom() - size.height() - margin)
+        dialog.move(x, y)
 
     def fetch_agent_reply(self, prompt: str) -> None:
         reply = call_agent(self.config, prompt)
@@ -1261,10 +1587,11 @@ class DesktopMentorPet(QWidget):
         painter.drawPixmap(sticker, self.pixmap, QRectF(self.pixmap.rect()))
         painter.restore()
 
-        self.draw_chat_button(painter)
+        self.draw_action_buttons(painter)
 
     def sticker_rect(self) -> QRectF:
-        return QRectF((self.width() - self.pet_size) / 2, self.bubble_height + 6, self.pet_size, self.pet_size)
+        usable_width = max(self.pet_size, self.width() - self.action_rail_width())
+        return QRectF((usable_width - self.pet_size) / 2, self.bubble_height + 6, self.pet_size, self.pet_size)
 
     def draw_bubble(self, painter: QPainter) -> None:
         now = time.monotonic()
@@ -1304,12 +1631,15 @@ class DesktopMentorPet(QWidget):
         )
         painter.restore()
 
-    def draw_chat_button(self, painter: QPainter) -> None:
-        button = self.chat_button_rect()
+    def draw_action_buttons(self, painter: QPainter) -> None:
+        self.draw_settings_button(painter)
+        self.draw_chat_button(painter)
+
+    def draw_round_button_base(self, painter: QPainter, button: QRectF, *, pressed: bool) -> None:
         painter.save()
         painter.setRenderHint(QPainter.RenderHint.Antialiasing, True)
 
-        if self.chat_button_pressed:
+        if pressed:
             bg = QColor(55, 122, 255, 238)
             shadow = QColor(0, 0, 0, 80)
         else:
@@ -1321,7 +1651,14 @@ class DesktopMentorPet(QWidget):
         painter.drawEllipse(button.translated(0, 2))
         painter.setBrush(bg)
         painter.drawEllipse(button)
+        painter.restore()
 
+    def draw_chat_button(self, painter: QPainter) -> None:
+        button = self.chat_button_rect()
+        self.draw_round_button_base(painter, button, pressed=self.chat_button_pressed)
+
+        painter.save()
+        painter.setRenderHint(QPainter.RenderHint.Antialiasing, True)
         painter.setPen(QPen(QColor(255, 255, 255, 235), max(1.7, button.width() * 0.055)))
         painter.setBrush(Qt.BrushStyle.NoBrush)
         bubble = button.adjusted(button.width() * 0.24, button.height() * 0.25, -button.width() * 0.22, -button.height() * 0.34)
@@ -1333,6 +1670,26 @@ class DesktopMentorPet(QWidget):
         tail.lineTo(bubble.left() + bubble.width() * 0.22, bubble.bottom() + button.height() * 0.16)
         tail.lineTo(bubble.left() + bubble.width() * 0.48, bubble.bottom() - 0.5)
         painter.drawPath(tail)
+        painter.restore()
+
+    def draw_settings_button(self, painter: QPainter) -> None:
+        button = self.settings_button_rect()
+        self.draw_round_button_base(painter, button, pressed=self.settings_button_pressed)
+
+        painter.save()
+        painter.setRenderHint(QPainter.RenderHint.Antialiasing, True)
+        center = button.center()
+        outer = button.width() * 0.22
+        inner = button.width() * 0.08
+        painter.setPen(QPen(QColor(255, 255, 255, 235), max(1.6, button.width() * 0.052)))
+        painter.setBrush(Qt.BrushStyle.NoBrush)
+        painter.drawEllipse(center, outer, outer)
+        painter.drawEllipse(center, inner, inner)
+        for index in range(8):
+            angle = math.tau * index / 8
+            start = QPointF(center.x() + math.cos(angle) * outer, center.y() + math.sin(angle) * outer)
+            end = QPointF(center.x() + math.cos(angle) * outer * 1.34, center.y() + math.sin(angle) * outer * 1.34)
+            painter.drawLine(start, end)
         painter.restore()
 
     @staticmethod
@@ -1355,13 +1712,26 @@ def parse_args(argv: list[str]) -> argparse.Namespace:
     parser.add_argument("--size", type=int, default=150, help="portrait size in pixels")
     parser.add_argument("--quit-after", type=float, default=0.0, help="exit after N seconds")
     parser.add_argument("--self-test", action="store_true", help="load the app without opening a visible pet")
+    parser.add_argument("--make-icon", nargs=2, metavar=("SOURCE_IMAGE", "OUTPUT_ICO"), help="convert a PNG/image file to ICO")
+    parser.add_argument("--ensure-default-icon", action="store_true", help="generate assets/desktop_mentor.ico from assets/default_mentor.png")
+    parser.add_argument("--force-icon", action="store_true", help="regenerate ICO even when the target is newer")
     return parser.parse_args(argv)
 
 
 def main(argv: list[str]) -> int:
     args = parse_args(argv)
+    if args.make_icon:
+        icon_path = convert_image_to_ico(Path(args.make_icon[0]), Path(args.make_icon[1]), force=True)
+        print(json.dumps({"ok": True, "icon": str(icon_path)}, ensure_ascii=False))
+        return 0
+    if args.ensure_default_icon:
+        icon_path = ensure_default_icon(force=args.force_icon)
+        print(json.dumps({"ok": True, "icon": str(icon_path)}, ensure_ascii=False))
+        return 0
+
     app = QApplication(sys.argv[:1])
     app.setApplicationName(APP_NAME)
+    app.setStyleSheet(APP_STYLESHEET)
     image_path = args.image.expanduser().resolve()
 
     pet = DesktopMentorPet(image_path, args.message, args.size)
@@ -1373,6 +1743,8 @@ def main(argv: list[str]) -> int:
             "click_message": pet.config.click_message,
             "idle_message": pet.config.idle_message,
             "idle_mode": pet.config.idle_mode,
+            "icon": pet.config.icon_path,
+            "icon_error": pet.icon_error,
             "window_size": [pet.width(), pet.height()],
             "config_path": str(pet.config_path),
         }

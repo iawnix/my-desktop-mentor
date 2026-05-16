@@ -31,6 +31,8 @@ scripts\windows\run_desktop_mentor_quiet.vbs
 scripts\windows\build_windows_exe.bat
 ```
 
+脚本会先把 `assets\default_mentor.png` 转成 `assets\desktop_mentor.ico`，再开始 PyInstaller 打包。
+
 输出：
 
 ```text
@@ -47,4 +49,4 @@ dist\MyDesktopMentor.exe
 %APPDATA%\MyDesktopMentor\config.json
 ```
 
-API key、agent URL、style prompt、idle 提醒话术、点击互动话术、idle 模式和桌宠形象路径都是运行时设置，不写入项目目录。
+API key、agent URL、style prompt、idle 提醒话术、点击互动话术、idle 模式和桌宠形象路径都是运行时设置，不写入项目目录。用户在设置里选择 PNG 形象时，程序会自动在 `%APPDATA%\MyDesktopMentor\icons` 下缓存对应 ICO。

@@ -1,15 +1,23 @@
 # -*- mode: python ; coding: utf-8 -*-
 
 from pathlib import Path
+import subprocess
+import sys
 
 root = Path(__file__).resolve().parents[2]
+default_image = root / "assets" / "default_mentor.png"
+default_icon = root / "assets" / "desktop_mentor.ico"
+
+if not default_icon.exists() or default_icon.stat().st_mtime < default_image.stat().st_mtime:
+    subprocess.run([sys.executable, str(root / "desktop_mentor.py"), "--ensure-default-icon"], check=True)
 
 a = Analysis(
     ["desktop_mentor.py"],
     pathex=[str(root)],
     binaries=[],
     datas=[
-        (str(root / "assets" / "default_mentor.png"), "assets"),
+        (str(default_image), "assets"),
+        (str(default_icon), "assets"),
     ],
     hiddenimports=[],
     hookspath=[],
@@ -37,5 +45,5 @@ exe = EXE(
     target_arch=None,
     codesign_identity=None,
     entitlements_file=None,
-    icon=str(root / "assets" / "desktop_mentor.ico"),
+    icon=str(default_icon),
 )
