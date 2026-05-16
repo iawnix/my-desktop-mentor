@@ -66,70 +66,273 @@ from PySide6.QtWidgets import (
 
 
 APP_STYLESHEET = """
+* {
+    font-family: "SF Pro Text", "Segoe UI", "Noto Sans CJK SC", "Microsoft YaHei", sans-serif;
+}
 QDialog {
-    background: #111827;
-    color: #e5e7eb;
+    background: #0b101a;
+    color: #e8eef8;
     font-size: 13px;
 }
+QWidget#dialogSurface {
+    background: #0b101a;
+}
+QFrame#dialogShell {
+    background: qlineargradient(x1:0, y1:0, x2:1, y2:1, stop:0 rgba(31, 41, 58, 236), stop:0.58 rgba(13, 20, 33, 244), stop:1 rgba(9, 13, 22, 248));
+    border: 1px solid rgba(154, 169, 194, 71);
+    border-radius: 18px;
+}
+QFrame#settingsRail {
+    background: qlineargradient(x1:0, y1:0, x2:0, y2:1, stop:0 rgba(38, 78, 118, 184), stop:0.48 rgba(17, 31, 51, 224), stop:1 rgba(9, 15, 27, 240));
+    border: 1px solid rgba(145, 165, 195, 51);
+    border-radius: 16px;
+}
+QFrame#sectionCard, QFrame#glassPanel {
+    background: rgba(15, 23, 38, 194);
+    border: 1px solid rgba(116, 135, 163, 71);
+    border-radius: 14px;
+}
+QFrame#hairline {
+    background: rgba(125, 145, 176, 56);
+    border: 0;
+    min-height: 1px;
+    max-height: 1px;
+}
+QFrame#settingsFooter {
+    background: rgba(9, 14, 24, 209);
+    border-top: 1px solid rgba(125, 145, 176, 51);
+    border-bottom-left-radius: 18px;
+    border-bottom-right-radius: 18px;
+}
 QLabel {
-    color: #d1d5db;
+    color: #d7dfec;
+    background: transparent;
+}
+QLabel#dialogTitle {
+    color: #f8fbff;
+    font-size: 20px;
+    font-weight: 700;
+}
+QLabel#dialogSubtitle, QLabel#mutedLabel {
+    color: #93a4ba;
+}
+QLabel#sectionTitle {
+    color: #f2f6fb;
+    font-size: 14px;
+    font-weight: 650;
+}
+QLabel#railTitle {
+    color: #f8fbff;
+    font-size: 16px;
+    font-weight: 700;
+}
+QLabel#railItem {
+    color: #aebbd0;
+    background: rgba(255, 255, 255, 10);
+    border: 1px solid rgba(255, 255, 255, 13);
+    border-radius: 10px;
+    padding: 8px 10px;
+}
+QLabel#railItemActive {
+    color: #ffffff;
+    background: qlineargradient(x1:0, y1:0, x2:1, y2:0, stop:0 rgba(72, 160, 220, 107), stop:1 rgba(75, 105, 205, 77));
+    border: 1px solid rgba(124, 197, 240, 87);
+    border-radius: 10px;
+    padding: 8px 10px;
 }
 QLineEdit, QTextEdit, QSpinBox, QDoubleSpinBox, QDateTimeEdit, QComboBox, QListWidget {
-    background: #0b1220;
-    border: 1px solid #334155;
-    border-radius: 8px;
-    color: #f8fafc;
-    padding: 8px 10px;
-    selection-background-color: #2563eb;
+    background: rgba(8, 13, 24, 224);
+    border: 1px solid rgba(113, 132, 160, 107);
+    border-radius: 11px;
+    color: #f7fbff;
+    padding: 9px 11px;
+    selection-background-color: #2f79d8;
+    selection-color: #ffffff;
+}
+QLineEdit:hover, QTextEdit:hover, QSpinBox:hover, QDoubleSpinBox:hover, QDateTimeEdit:hover, QComboBox:hover, QListWidget:hover {
+    border-color: rgba(120, 183, 232, 153);
 }
 QLineEdit:focus, QTextEdit:focus, QSpinBox:focus, QDoubleSpinBox:focus, QDateTimeEdit:focus, QComboBox:focus, QListWidget:focus {
-    border-color: #60a5fa;
+    border: 1px solid #73c8ff;
+    background: rgba(10, 17, 30, 245);
 }
 QTextEdit {
-    padding: 10px;
+    padding: 12px;
+}
+QCheckBox {
+    color: #d7dfec;
+    spacing: 9px;
+}
+QCheckBox::indicator {
+    width: 17px;
+    height: 17px;
+    border-radius: 6px;
+    border: 1px solid rgba(123, 145, 176, 179);
+    background: rgba(6, 11, 20, 224);
+}
+QCheckBox::indicator:hover {
+    border-color: #73c8ff;
+}
+QCheckBox::indicator:checked {
+    background: qlineargradient(x1:0, y1:0, x2:1, y2:1, stop:0 #5ac8fa, stop:1 #246bfe);
+    border-color: #8bd7ff;
 }
 QPushButton {
-    background: #1f2937;
-    border: 1px solid #3b4758;
-    border-radius: 8px;
-    color: #f8fafc;
-    padding: 8px 14px;
+    background: rgba(23, 33, 49, 235);
+    border: 1px solid rgba(123, 145, 176, 92);
+    border-radius: 11px;
+    color: #edf4fb;
+    padding: 9px 15px;
+    min-height: 18px;
 }
 QPushButton:hover {
-    background: #263449;
-    border-color: #60a5fa;
+    background: rgba(36, 51, 73, 245);
+    border-color: rgba(115, 200, 255, 184);
 }
 QPushButton:pressed {
-    background: #1d4ed8;
+    background: rgba(28, 77, 132, 235);
+}
+QPushButton#primaryButton {
+    background: qlineargradient(x1:0, y1:0, x2:1, y2:0, stop:0 #47b7f5, stop:0.55 #2f79d8, stop:1 #5968d7);
+    border: 1px solid rgba(150, 218, 255, 184);
+    color: #ffffff;
+    font-weight: 650;
+}
+QPushButton#primaryButton:hover {
+    background: qlineargradient(x1:0, y1:0, x2:1, y2:0, stop:0 #62c6fb, stop:0.55 #3c8be7, stop:1 #6878ea);
+}
+QPushButton#secondaryButton {
+    background: rgba(18, 27, 43, 179);
+}
+QPushButton#miniButton {
+    padding: 8px 12px;
+    min-width: 58px;
+}
+QPushButton#dangerButton {
+    background: rgba(69, 29, 38, 204);
+    border-color: rgba(236, 112, 128, 115);
+}
+QPushButton#dangerButton:hover {
+    background: rgba(94, 36, 48, 245);
+    border-color: rgba(255, 137, 152, 189);
 }
 QDialogButtonBox QPushButton {
-    min-width: 76px;
+    min-width: 78px;
 }
-QComboBox::drop-down {
+QComboBox::drop-down, QDateTimeEdit::drop-down, QSpinBox::up-button, QSpinBox::down-button, QDoubleSpinBox::up-button, QDoubleSpinBox::down-button {
     border: 0;
     width: 24px;
 }
-QMenu {
-    background: #0f172a;
-    border: 1px solid #334155;
+QScrollArea {
+    background: transparent;
+    border: 0;
+}
+QScrollBar:vertical {
+    background: transparent;
+    width: 10px;
+    margin: 8px 2px 8px 2px;
+}
+QScrollBar::handle:vertical {
+    background: rgba(125, 145, 176, 92);
+    border-radius: 5px;
+    min-height: 34px;
+}
+QScrollBar::handle:vertical:hover {
+    background: rgba(115, 200, 255, 140);
+}
+QScrollBar::add-line:vertical, QScrollBar::sub-line:vertical {
+    height: 0;
+}
+QListWidget {
+    outline: 0;
+    padding: 6px;
+}
+QListWidget::item {
     border-radius: 10px;
-    color: #e5e7eb;
+    padding: 10px 12px;
+    margin: 3px 0;
+    color: #dce6f3;
+}
+QListWidget::item:hover {
+    background: rgba(65, 123, 177, 71);
+}
+QListWidget::item:selected {
+    background: qlineargradient(x1:0, y1:0, x2:1, y2:0, stop:0 rgba(72, 160, 220, 133), stop:1 rgba(89, 104, 215, 107));
+    color: #ffffff;
+}
+QMenu {
+    background: rgba(13, 20, 33, 245);
+    border: 1px solid rgba(125, 145, 176, 87);
+    border-radius: 14px;
+    color: #e8eef8;
     padding: 8px;
 }
 QMenu::item {
-    border-radius: 7px;
-    padding: 8px 28px 8px 12px;
+    border-radius: 10px;
+    padding: 9px 34px 9px 14px;
 }
 QMenu::item:selected {
-    background: #2563eb;
+    background: qlineargradient(x1:0, y1:0, x2:1, y2:0, stop:0 rgba(72, 160, 220, 128), stop:1 rgba(89, 104, 215, 107));
     color: #ffffff;
 }
 QMenu::separator {
     height: 1px;
-    background: #263244;
-    margin: 6px 8px;
+    background: rgba(125, 145, 176, 51);
+    margin: 7px 9px;
 }
 """
+
+
+def styled_label(text: str, object_name: str, word_wrap: bool = False) -> QLabel:
+    label = QLabel(text)
+    label.setObjectName(object_name)
+    label.setWordWrap(word_wrap)
+    return label
+
+
+def make_hairline() -> QFrame:
+    line = QFrame()
+    line.setObjectName("hairline")
+    line.setFrameShape(QFrame.Shape.NoFrame)
+    return line
+
+
+def mark_button(button: QPushButton | None, object_name: str) -> None:
+    if button is not None:
+        button.setObjectName(object_name)
+        button.setCursor(Qt.CursorShape.PointingHandCursor)
+        button.style().unpolish(button)
+        button.style().polish(button)
+
+
+def style_dialog_buttons(buttons: QDialogButtonBox, primary: QDialogButtonBox.StandardButton | None = None) -> None:
+    for button in buttons.buttons():
+        mark_button(button, "secondaryButton")
+    if primary is not None:
+        mark_button(buttons.button(primary), "primaryButton")
+
+
+def section_card(title: str, content_layout: QFormLayout | QVBoxLayout, subtitle: str = "") -> QFrame:
+    frame = QFrame()
+    frame.setObjectName("sectionCard")
+    layout = QVBoxLayout(frame)
+    layout.setContentsMargins(16, 15, 16, 16)
+    layout.setSpacing(10)
+    layout.addWidget(styled_label(title, "sectionTitle"))
+    if subtitle:
+        layout.addWidget(styled_label(subtitle, "mutedLabel", True))
+    layout.addWidget(make_hairline())
+    layout.addLayout(content_layout)
+    return frame
+
+
+def modern_form_layout() -> QFormLayout:
+    form = QFormLayout()
+    form.setLabelAlignment(Qt.AlignmentFlag.AlignRight | Qt.AlignmentFlag.AlignVCenter)
+    form.setFormAlignment(Qt.AlignmentFlag.AlignTop)
+    form.setHorizontalSpacing(14)
+    form.setVerticalSpacing(12)
+    return form
 
 
 def app_root() -> Path:
@@ -898,10 +1101,11 @@ class SettingsDialog(QDialog):
         super().__init__(parent)
         self.setWindowTitle(f"{APP_NAME} 设置")
         self.setStyleSheet(APP_STYLESHEET)
+        self.setObjectName("dialogSurface")
         screen = QGuiApplication.primaryScreen()
         available = screen.availableGeometry() if screen else QRect(0, 0, 1280, 720)
-        self.resize(min(740, max(560, available.width() - 120)), min(760, max(460, available.height() - 120)))
-        self.setMinimumSize(520, 420)
+        self.resize(min(920, max(720, available.width() - 120)), min(780, max(520, available.height() - 120)))
+        self.setMinimumSize(680, 480)
 
         self.url_edit = QLineEdit(config.api_url)
         self.url_edit.setPlaceholderText("OpenAI-compatible base URL, e.g. http://127.0.0.1:8000")
@@ -915,16 +1119,22 @@ class SettingsDialog(QDialog):
         self.config_dir_edit = QLineEdit(config.config_dir or str(config_path().parent))
         self.config_dir_edit.setPlaceholderText("runtime config directory")
         config_dir_button = QPushButton("选择")
+        mark_button(config_dir_button, "miniButton")
         config_dir_button.clicked.connect(self.browse_config_dir)
         config_dir_row = QHBoxLayout()
+        config_dir_row.setContentsMargins(0, 0, 0, 0)
+        config_dir_row.setSpacing(8)
         config_dir_row.addWidget(self.config_dir_edit, 1)
         config_dir_row.addWidget(config_dir_button)
 
         self.image_edit = QLineEdit(config.image_path or str(DEFAULT_IMAGE))
         self.image_edit.setPlaceholderText("PNG/JPG image path; PNG will be converted to ICO")
         image_button = QPushButton("选择")
+        mark_button(image_button, "miniButton")
         image_button.clicked.connect(self.browse_image)
         image_row = QHBoxLayout()
+        image_row.setContentsMargins(0, 0, 0, 0)
+        image_row.setSpacing(8)
         image_row.addWidget(self.image_edit, 1)
         image_row.addWidget(image_button)
 
@@ -965,78 +1175,110 @@ class SettingsDialog(QDialog):
         self.memory_turns_spin.setSuffix(" turns")
 
         self.prompt_edit = QTextEdit(config.system_prompt or DEFAULT_PERSONALITY_PROMPT)
-        self.prompt_edit.setMinimumHeight(220)
+        self.prompt_edit.setMinimumHeight(190)
 
-        title = QLabel("Agent 设置")
-        title_font = QFont()
-        title_font.setPointSize(18)
-        title_font.setWeight(QFont.Weight.Bold)
-        title.setFont(title_font)
-        subtitle = QLabel("配置 agent 接口、桌宠形象、交互话术和空闲提醒。")
-        subtitle.setWordWrap(True)
+        agent_form = modern_form_layout()
+        agent_form.addRow("Agent URL", self.url_edit)
+        agent_form.addRow("API Key", self.key_edit)
+        agent_form.addRow("Model", self.model_edit)
 
-        form = QFormLayout()
-        form.setLabelAlignment(Qt.AlignmentFlag.AlignRight)
-        form.setFormAlignment(Qt.AlignmentFlag.AlignTop)
-        form.setHorizontalSpacing(14)
-        form.setVerticalSpacing(12)
-        form.addRow("Agent URL", self.url_edit)
-        form.addRow("API Key", self.key_edit)
-        form.addRow("Model", self.model_edit)
-        form.addRow("Config directory", config_dir_row)
-        form.addRow("Pet image", image_row)
-        form.addRow("Click message", self.click_message_edit)
-        form.addRow("Idle message", self.idle_message_edit)
-        form.addRow("Drop message", self.drop_message_edit)
-        form.addRow("Message duration", self.message_seconds_spin)
-        form.addRow("Idle reminder", self.idle_spin)
-        form.addRow("Idle mode", self.idle_mode_combo)
-        form.addRow("Memory", self.memory_check)
-        form.addRow("Memory depth", self.memory_turns_spin)
-        form.addRow("Style prompt", self.prompt_edit)
+        runtime_form = modern_form_layout()
+        runtime_form.addRow("Config directory", config_dir_row)
+        runtime_form.addRow("Pet image", image_row)
+        runtime_form.addRow("Message duration", self.message_seconds_spin)
+
+        interaction_form = modern_form_layout()
+        interaction_form.addRow("Click message", self.click_message_edit)
+        interaction_form.addRow("Idle message", self.idle_message_edit)
+        interaction_form.addRow("Drop message", self.drop_message_edit)
+        interaction_form.addRow("Idle reminder", self.idle_spin)
+        interaction_form.addRow("Idle mode", self.idle_mode_combo)
+
+        memory_form = modern_form_layout()
+        memory_form.addRow("Memory", self.memory_check)
+        memory_form.addRow("Memory depth", self.memory_turns_spin)
+
+        prompt_layout = QVBoxLayout()
+        prompt_layout.setContentsMargins(0, 0, 0, 0)
+        prompt_layout.setSpacing(10)
+        prompt_layout.addWidget(self.prompt_edit)
 
         reset_prompt = QPushButton("恢复默认人格")
+        mark_button(reset_prompt, "secondaryButton")
         reset_prompt.clicked.connect(lambda: self.prompt_edit.setPlainText(DEFAULT_PERSONALITY_PROMPT))
 
-        hint = QLabel("配置保存在当前系统用户配置目录，不写入项目仓库。PNG 形象会自动生成 ICO。URL 按 OpenAI-compatible /v1/chat/completions 调用。")
-        hint.setWordWrap(True)
-        hint.setObjectName("hint")
-        hint.setStyleSheet("#hint { color: #94a3b8; background: #0b1220; border: 1px solid #1f2a3a; border-radius: 8px; padding: 10px; }")
-
         buttons = QDialogButtonBox(QDialogButtonBox.StandardButton.Save | QDialogButtonBox.StandardButton.Cancel)
+        buttons.button(QDialogButtonBox.StandardButton.Save).setText("保存")
+        buttons.button(QDialogButtonBox.StandardButton.Cancel).setText("取消")
+        style_dialog_buttons(buttons, QDialogButtonBox.StandardButton.Save)
         buttons.accepted.connect(self.accept)
         buttons.rejected.connect(self.reject)
 
         bottom = QHBoxLayout()
+        bottom.setContentsMargins(18, 12, 18, 12)
+        bottom.setSpacing(10)
         bottom.addWidget(reset_prompt)
         bottom.addStretch(1)
         bottom.addWidget(buttons)
 
+        rail = QFrame()
+        rail.setObjectName("settingsRail")
+        rail.setFixedWidth(168)
+        rail_layout = QVBoxLayout(rail)
+        rail_layout.setContentsMargins(14, 15, 14, 15)
+        rail_layout.setSpacing(10)
+        rail_layout.addWidget(styled_label(APP_NAME, "railTitle", True))
+        rail_layout.addSpacing(6)
+        rail_layout.addWidget(styled_label("接口", "railItemActive"))
+        for item_text in ("运行", "互动", "记忆", "风格"):
+            rail_layout.addWidget(styled_label(item_text, "railItem"))
+        rail_layout.addStretch(1)
+        rail_layout.addWidget(styled_label("runtime local", "mutedLabel"))
+
+        title = styled_label("Agent 设置", "dialogTitle")
+        subtitle = styled_label("接口、形象、提醒、记忆与话术集中配置。", "dialogSubtitle", True)
+
         content = QWidget()
         content_layout = QVBoxLayout(content)
-        content_layout.setContentsMargins(22, 20, 22, 20)
+        content_layout.setContentsMargins(2, 2, 12, 2)
         content_layout.setSpacing(14)
         content_layout.addWidget(title)
         content_layout.addWidget(subtitle)
-        content_layout.addWidget(hint)
-        content_layout.addLayout(form)
+        content_layout.addWidget(section_card("Agent", agent_form))
+        content_layout.addWidget(section_card("运行", runtime_form))
+        content_layout.addWidget(section_card("互动", interaction_form))
+        content_layout.addWidget(section_card("记忆", memory_form))
+        content_layout.addWidget(section_card("风格提示词", prompt_layout))
         content_layout.addStretch(1)
 
         scroll = QScrollArea()
         scroll.setWidgetResizable(True)
         scroll.setFrameShape(QFrame.Shape.NoFrame)
+        scroll.setHorizontalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAlwaysOff)
         scroll.setWidget(content)
 
-        layout = QVBoxLayout(self)
-        layout.setContentsMargins(0, 0, 0, 0)
-        layout.setSpacing(0)
-        layout.addWidget(scroll, 1)
-        bottom_container = QWidget()
+        main = QHBoxLayout()
+        main.setContentsMargins(18, 18, 18, 12)
+        main.setSpacing(16)
+        main.addWidget(rail, 0)
+        main.addWidget(scroll, 1)
+
+        bottom_container = QFrame()
         bottom_container.setObjectName("settingsFooter")
-        bottom_container.setStyleSheet("#settingsFooter { border-top: 1px solid #263244; background: #111827; }")
         bottom_container.setLayout(bottom)
-        bottom.setContentsMargins(22, 12, 22, 12)
-        layout.addWidget(bottom_container, 0)
+
+        shell = QFrame()
+        shell.setObjectName("dialogShell")
+        shell_layout = QVBoxLayout(shell)
+        shell_layout.setContentsMargins(0, 0, 0, 0)
+        shell_layout.setSpacing(0)
+        shell_layout.addLayout(main, 1)
+        shell_layout.addWidget(bottom_container, 0)
+
+        layout = QVBoxLayout(self)
+        layout.setContentsMargins(10, 10, 10, 10)
+        layout.setSpacing(0)
+        layout.addWidget(shell)
 
     def browse_image(self) -> None:
         current = self.image_edit.text().strip()
@@ -1091,7 +1333,9 @@ class ChatDialog(QDialog):
         super().__init__(parent)
         self.setWindowTitle(f"问{APP_NAME}")
         self.setStyleSheet(APP_STYLESHEET)
-        self.resize(420, 260)
+        self.setObjectName("dialogSurface")
+        self.resize(460, 320)
+        self.setMinimumSize(380, 260)
 
         self.text_edit = QTextEdit()
         self.text_edit.setPlaceholderText("你要问什么")
@@ -1100,14 +1344,30 @@ class ChatDialog(QDialog):
         buttons = QDialogButtonBox(QDialogButtonBox.StandardButton.Ok | QDialogButtonBox.StandardButton.Cancel)
         buttons.button(QDialogButtonBox.StandardButton.Ok).setText("发送")
         buttons.button(QDialogButtonBox.StandardButton.Cancel).setText("取消")
+        style_dialog_buttons(buttons, QDialogButtonBox.StandardButton.Ok)
         buttons.accepted.connect(self.accept)
         buttons.rejected.connect(self.reject)
 
+        panel = QFrame()
+        panel.setObjectName("glassPanel")
+        panel_layout = QVBoxLayout(panel)
+        panel_layout.setContentsMargins(16, 15, 16, 16)
+        panel_layout.setSpacing(12)
+        panel_layout.addWidget(styled_label("对话", "dialogTitle"))
+        panel_layout.addWidget(styled_label("把问题、目标或文件处理需求直接发给导师。", "dialogSubtitle", True))
+        panel_layout.addWidget(self.text_edit, 1)
+        panel_layout.addWidget(buttons, 0)
+
+        shell = QFrame()
+        shell.setObjectName("dialogShell")
+        shell_layout = QVBoxLayout(shell)
+        shell_layout.setContentsMargins(14, 14, 14, 14)
+        shell_layout.addWidget(panel)
+
         layout = QVBoxLayout(self)
-        layout.setContentsMargins(18, 18, 18, 18)
-        layout.setSpacing(12)
-        layout.addWidget(self.text_edit)
-        layout.addWidget(buttons)
+        layout.setContentsMargins(10, 10, 10, 10)
+        layout.setSpacing(0)
+        layout.addWidget(shell)
 
     def text(self) -> str:
         return self.text_edit.toPlainText().strip()
@@ -1122,21 +1382,25 @@ class TodoDialog(QDialog):
         super().__init__(parent)
         self.setWindowTitle("待办提醒")
         self.setStyleSheet(APP_STYLESHEET)
-        self.resize(560, 460)
+        self.setObjectName("dialogSurface")
+        self.resize(620, 500)
+        self.setMinimumSize(480, 380)
         self.todos = load_todos_from_items(todos)
 
         header = QHBoxLayout()
+        header.setContentsMargins(0, 0, 0, 0)
+        header.setSpacing(10)
         badge = QLabel()
         pixmap = QPixmap(str(TODO_BADGE_IMAGE))
         if not pixmap.isNull():
             badge.setPixmap(pixmap.scaled(42, 42, Qt.AspectRatioMode.KeepAspectRatio, Qt.TransformationMode.SmoothTransformation))
-        title = QLabel("待办")
-        title_font = QFont()
-        title_font.setPointSize(18)
-        title_font.setWeight(QFont.Weight.Bold)
-        title.setFont(title_font)
         header.addWidget(badge)
-        header.addWidget(title)
+        title_box = QVBoxLayout()
+        title_box.setContentsMargins(0, 0, 0, 0)
+        title_box.setSpacing(2)
+        title_box.addWidget(styled_label("待办", "dialogTitle"))
+        title_box.addWidget(styled_label("到点提醒一次，提醒后自动移除。", "dialogSubtitle", True))
+        header.addLayout(title_box, 1)
         header.addStretch(1)
 
         self.todo_edit = QLineEdit()
@@ -1147,9 +1411,12 @@ class TodoDialog(QDialog):
         self.due_edit.setDisplayFormat("yyyy-MM-dd HH:mm")
 
         add_button = QPushButton("添加")
+        mark_button(add_button, "primaryButton")
         add_button.clicked.connect(self.add_todo)
 
         editor = QHBoxLayout()
+        editor.setContentsMargins(0, 0, 0, 0)
+        editor.setSpacing(8)
         editor.addWidget(self.todo_edit, 1)
         editor.addWidget(self.due_edit)
         editor.addWidget(add_button)
@@ -1158,23 +1425,42 @@ class TodoDialog(QDialog):
         self.todo_list.setMinimumHeight(220)
 
         remove_button = QPushButton("删除选中")
+        mark_button(remove_button, "dangerButton")
         remove_button.clicked.connect(self.remove_selected)
 
         buttons = QDialogButtonBox(QDialogButtonBox.StandardButton.Close)
+        buttons.button(QDialogButtonBox.StandardButton.Close).setText("关闭")
+        style_dialog_buttons(buttons)
         buttons.rejected.connect(self.reject)
 
         bottom = QHBoxLayout()
+        bottom.setContentsMargins(0, 0, 0, 0)
+        bottom.setSpacing(10)
         bottom.addWidget(remove_button)
         bottom.addStretch(1)
         bottom.addWidget(buttons)
 
+        panel = QFrame()
+        panel.setObjectName("glassPanel")
+        panel_layout = QVBoxLayout(panel)
+        panel_layout.setContentsMargins(16, 15, 16, 16)
+        panel_layout.setSpacing(13)
+        panel_layout.addLayout(header)
+        panel_layout.addWidget(make_hairline())
+        panel_layout.addLayout(editor)
+        panel_layout.addWidget(self.todo_list, 1)
+        panel_layout.addLayout(bottom)
+
+        shell = QFrame()
+        shell.setObjectName("dialogShell")
+        shell_layout = QVBoxLayout(shell)
+        shell_layout.setContentsMargins(14, 14, 14, 14)
+        shell_layout.addWidget(panel)
+
         layout = QVBoxLayout(self)
-        layout.setContentsMargins(18, 18, 18, 18)
-        layout.setSpacing(12)
-        layout.addLayout(header)
-        layout.addLayout(editor)
-        layout.addWidget(self.todo_list, 1)
-        layout.addLayout(bottom)
+        layout.setContentsMargins(10, 10, 10, 10)
+        layout.setSpacing(0)
+        layout.addWidget(shell)
         self.refresh_list()
 
     def refresh_list(self) -> None:
@@ -1915,7 +2201,7 @@ class DesktopMentorPet(QWidget):
         menu.setStyleSheet(APP_STYLESHEET)
         chat = QAction("对话", self)
         todo_action = QAction("待办", self)
-        settings = QAction("Agent 设置", self)
+        settings = QAction("设置", self)
         quit_action = QAction("退出", self)
         bigger = QAction("放大", self)
         smaller = QAction("缩小", self)
@@ -1928,8 +2214,8 @@ class DesktopMentorPet(QWidget):
         smaller.triggered.connect(lambda: self.set_pet_size(self.pet_size - 28))
         reset.triggered.connect(self.move_to_lower_right)
         menu.addAction(chat)
-        menu.addAction(todo_action)
         menu.addAction(settings)
+        menu.addAction(todo_action)
         menu.addAction(quit_action)
         menu.addSeparator()
         menu.addAction(bigger)
