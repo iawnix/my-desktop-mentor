@@ -1,0 +1,10 @@
+__pycache__/
+*.py[cod]
+.venv/
+.env
+config.json
+build/
+dist/
+*.spec.bak
+windows-run.log
+windows-build.log

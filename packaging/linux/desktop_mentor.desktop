@@ -1,0 +1,10 @@
+[Desktop Entry]
+Type=Application
+Name=My Desktop Mentor
+Name[zh_CN]=我的桌面导师
+Comment=Always-on-top configurable desktop mentor
+Comment[zh_CN]=可配置的置顶桌面导师
+Exec=/opt/my-desktop-mentor/scripts/linux/run_desktop_mentor.sh
+Icon=/opt/my-desktop-mentor/assets/default_mentor.png
+Terminal=false
+Categories=Utility;
