@@ -1,6 +1,6 @@
 # 我的桌面导师
 
-一个可配置的桌面导师 / 桌宠应用。主程序是 PySide6 写的透明置顶贴纸窗口，支持鼠标和触屏拖动、贴纸旁按钮对话/设置/退出、空闲提醒、文件/文件夹拖放、OpenAI-compatible agent 接口、可选本地对话记忆，以及 Windows 打包。
+一个可配置的桌面导师 / 桌宠应用。主程序是 PySide6 写的透明置顶贴纸窗口，支持鼠标和触屏拖动、贴纸旁按钮对话/设置/退出、右键待办提醒、空闲提醒、文件/文件夹拖放、OpenAI-compatible agent 接口、可选本地对话记忆，以及 Windows 打包。
 
 ## 目录
 
@@ -17,8 +17,9 @@
 
 关键文件：
 
-- `assets/default_mentor.png`：默认桌宠形象。
+- `assets/cow.png`：默认桌宠形象。
 - `assets/desktop_mentor.ico`：由默认 PNG 自动生成的 Windows exe 图标。
+- `assets/todo_badge.png`：待办窗口图标。
 - `requirements.txt`：源码运行依赖。
 - `scripts/linux/run_desktop_mentor.sh`：Linux 启动脚本。
 - `scripts/windows/run_desktop_mentor.bat`：Windows 源码运行脚本。
@@ -29,7 +30,7 @@
 - `packaging/linux/desktop_mentor.desktop`：Linux 桌面启动模板。
 - `docs/WINDOWS.md`：Windows 使用说明。
 
-已清理掉旧生成素材、预览图、临时 helper 和 Python bytecode 缓存；必要默认素材以 `assets/default_mentor.png` 为准，`assets/desktop_mentor.ico` 可由程序自动生成。
+已清理掉旧生成素材、预览图、临时 helper 和 Python bytecode 缓存；必要默认素材以 `assets/cow.png` 为准，`assets/desktop_mentor.ico` 可由程序自动生成。
 
 ## Linux 使用
 
@@ -84,7 +85,7 @@ scripts\windows\run_desktop_mentor_quiet.vbs
 scripts\windows\build_windows_exe.bat
 ```
 
-打包脚本会先把 `assets/default_mentor.png` 自动转换成 `assets/desktop_mentor.ico`，再执行 PyInstaller。
+打包脚本会先把 `assets/cow.png` 自动转换成 `assets/desktop_mentor.ico`，再执行 PyInstaller。
 
 输出文件：
 
@@ -99,10 +100,12 @@ dist\MyDesktopMentor.exe
 - `Agent URL`
 - `API Key`
 - `Model`
+- `Config directory`
 - `Pet image`
 - `Click message`
 - `Idle message`
 - `Drop message`
+- `Message duration`
 - `Idle reminder`
 - `Idle mode`
 - `Memory`
@@ -114,6 +117,10 @@ dist\MyDesktopMentor.exe
 默认人格是友好的科研导师。这个项目本身是桌面导师框架，用户可以通过设置修改形象、话术、空闲提醒、drop 行为和 style prompt，形成自己的导师桌宠。
 
 启用 `Memory` 后，程序会把最近对话保存在用户配置目录下的 `memory.jsonl`，并在调用 agent 时带上最近若干轮上下文。默认关闭，不会写入项目目录。
+
+`Config directory` 可以切换运行时设置目录；`config.json`、`memory.jsonl`、`todos.json` 和自动生成的图标缓存都会跟着这个目录走。
+
+右键菜单里的 `待办` 可以添加定时提醒。待办到期后桌宠会提醒一次，并从待办列表删除；待办提醒触发时会短暂压制 idle 提醒，避免两套机制同时弹出。
 
 用户提供 PNG 形象时，程序会在用户配置目录下自动缓存对应 ICO；默认 PNG 可手动转换：
 
@@ -150,4 +157,5 @@ DESKTOP_MENTOR_CONFIG=/path/to/config.json ./scripts/linux/run_desktop_mentor.sh
 
 - API key 只写入用户本机运行时配置，不写入项目目录。
 - 对话记忆只在用户开启 `Memory` 时写入用户配置目录，不写入项目目录。
+- 待办只写入用户配置目录的 `todos.json`，不写入项目目录。
 - `work/` 仍是本地任务目录，不同步进 Codex 主仓库。

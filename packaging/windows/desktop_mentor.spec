@@ -5,8 +5,9 @@ import subprocess
 import sys
 
 root = Path(__file__).resolve().parents[2]
-default_image = root / "assets" / "default_mentor.png"
+default_image = root / "assets" / "cow.png"
 default_icon = root / "assets" / "desktop_mentor.ico"
+todo_badge = root / "assets" / "todo_badge.png"
 
 if not default_icon.exists() or default_icon.stat().st_mtime < default_image.stat().st_mtime:
     subprocess.run([sys.executable, str(root / "desktop_mentor.py"), "--ensure-default-icon"], check=True)
@@ -18,6 +19,7 @@ a = Analysis(
     datas=[
         (str(default_image), "assets"),
         (str(default_icon), "assets"),
+        (str(todo_badge), "assets"),
     ],
     hiddenimports=[],
     hookspath=[],

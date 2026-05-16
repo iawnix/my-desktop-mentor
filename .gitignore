@@ -3,6 +3,10 @@ __pycache__/
 .venv/
 .env
 config.json
+config-dir.txt
+memory.jsonl
+todos.json
+icons/
 build/
 dist/
 *.spec.bak

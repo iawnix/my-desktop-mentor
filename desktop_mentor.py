@@ -24,7 +24,7 @@ import urllib.request
 from dataclasses import asdict, dataclass
 from pathlib import Path
 
-from PySide6.QtCore import QByteArray, QBuffer, QIODevice, QObject, QPoint, QPointF, QRect, QRectF, QTimer, Qt, QEvent, Signal
+from PySide6.QtCore import QByteArray, QBuffer, QDateTime, QIODevice, QObject, QPoint, QPointF, QRect, QRectF, QTimer, Qt, QEvent, Signal
 from PySide6.QtGui import (
     QAction,
     QColor,
@@ -44,14 +44,20 @@ from PySide6.QtWidgets import (
     QCheckBox,
     QDialog,
     QDialogButtonBox,
+    QDateTimeEdit,
+    QDoubleSpinBox,
     QFileDialog,
     QFormLayout,
+    QFrame,
     QHBoxLayout,
     QLabel,
     QLineEdit,
+    QListWidget,
+    QListWidgetItem,
     QMenu,
     QComboBox,
     QPushButton,
+    QScrollArea,
     QSpinBox,
     QTextEdit,
     QVBoxLayout,
@@ -68,7 +74,7 @@ QDialog {
 QLabel {
     color: #d1d5db;
 }
-QLineEdit, QTextEdit, QSpinBox, QComboBox {
+QLineEdit, QTextEdit, QSpinBox, QDoubleSpinBox, QDateTimeEdit, QComboBox, QListWidget {
     background: #0b1220;
     border: 1px solid #334155;
     border-radius: 8px;
@@ -76,7 +82,7 @@ QLineEdit, QTextEdit, QSpinBox, QComboBox {
     padding: 8px 10px;
     selection-background-color: #2563eb;
 }
-QLineEdit:focus, QTextEdit:focus, QSpinBox:focus, QComboBox:focus {
+QLineEdit:focus, QTextEdit:focus, QSpinBox:focus, QDoubleSpinBox:focus, QDateTimeEdit:focus, QComboBox:focus, QListWidget:focus {
     border-color: #60a5fa;
 }
 QTextEdit {
@@ -135,8 +141,9 @@ def app_root() -> Path:
 
 ROOT = app_root()
 APP_NAME = "我的桌面导师"
-DEFAULT_IMAGE = ROOT / "assets" / "default_mentor.png"
+DEFAULT_IMAGE = ROOT / "assets" / "cow.png"
 DEFAULT_ICON = ROOT / "assets" / "desktop_mentor.ico"
+TODO_BADGE_IMAGE = ROOT / "assets" / "todo_badge.png"
 DEFAULT_CLICK_MESSAGE = "我在。把目标和卡点说清楚，我们先找下一步。"
 DEFAULT_IDLE_MESSAGE = "进展怎么样？需要我帮你梳理一下下一步吗？"
 DEFAULT_DROP_MESSAGE = "文件我收到了。先看目标、约束和你最想解决的问题。"
@@ -169,6 +176,11 @@ CHAT_BUTTON_MARGIN = 4
 WINDOW_PAD = 15
 APP_ID = "my-desktop-mentor"
 DEFAULT_MODEL = "gpt-4o-mini"
+CONFIG_POINTER_NAME = "config-dir.txt"
+TODO_CHECK_INTERVAL_MS = 1_000
+DEFAULT_MESSAGE_SECONDS = 3.2
+MIN_MESSAGE_SECONDS = 0.8
+MAX_MESSAGE_SECONDS = 60.0
 DEFAULT_MEMORY_ENABLED = False
 DEFAULT_MEMORY_TURNS = 8
 MAX_MEMORY_TURNS = 24
@@ -241,9 +253,11 @@ class AgentConfig:
     model: str = DEFAULT_MODEL
     image_path: str = ""
     icon_path: str = ""
+    config_dir: str = ""
     click_message: str = DEFAULT_CLICK_MESSAGE
     idle_message: str = DEFAULT_IDLE_MESSAGE
     drop_message: str = DEFAULT_DROP_MESSAGE
+    message_seconds: float = DEFAULT_MESSAGE_SECONDS
     idle_seconds: int = DEFAULT_IDLE_SECONDS
     idle_mode: str = DEFAULT_IDLE_MODE
     memory_enabled: bool = DEFAULT_MEMORY_ENABLED
@@ -315,33 +329,78 @@ def as_local_pos(widget: QWidget, event_or_point: object) -> QPoint:
     return widget.mapFromGlobal(as_global_pos(widget, event_or_point))
 
 
+def default_config_dir() -> Path:
+    if sys.platform == "win32":
+        base = Path(os.environ.get("APPDATA", Path.home() / "AppData" / "Roaming"))
+        return base / "MyDesktopMentor"
+    if sys.platform == "darwin":
+        return Path.home() / "Library" / "Application Support" / "MyDesktopMentor"
+
+    base = Path(os.environ.get("XDG_CONFIG_HOME", Path.home() / ".config"))
+    return base / APP_ID
+
+
+def config_dir_pointer_path() -> Path:
+    return default_config_dir() / CONFIG_POINTER_NAME
+
+
+def configured_config_dir() -> Path:
+    override_dir = os.environ.get("DESKTOP_MENTOR_CONFIG_DIR", "").strip()
+    if override_dir:
+        return Path(override_dir).expanduser()
+
+    override_file = os.environ.get("DESKTOP_MENTOR_CONFIG", "").strip()
+    if override_file:
+        return Path(override_file).expanduser().parent
+
+    pointer = config_dir_pointer_path()
+    try:
+        if pointer.exists():
+            raw_path = pointer.read_text(encoding="utf-8").strip()
+            if raw_path:
+                return Path(raw_path).expanduser()
+    except OSError:
+        pass
+
+    return default_config_dir()
+
+
 def config_path() -> Path:
     override = os.environ.get("DESKTOP_MENTOR_CONFIG", "").strip()
     if override:
         return Path(override).expanduser()
+    return configured_config_dir() / "config.json"
 
-    if sys.platform == "win32":
-        base = Path(os.environ.get("APPDATA", Path.home() / "AppData" / "Roaming"))
-        return base / "MyDesktopMentor" / "config.json"
-    if sys.platform == "darwin":
-        return Path.home() / "Library" / "Application Support" / "MyDesktopMentor" / "config.json"
 
-    base = Path(os.environ.get("XDG_CONFIG_HOME", Path.home() / ".config"))
-    return base / APP_ID / "config.json"
+def save_config_directory(directory: Path) -> Path:
+    target = directory.expanduser().resolve()
+    target.mkdir(parents=True, exist_ok=True)
+    pointer = config_dir_pointer_path()
+    pointer.parent.mkdir(parents=True, exist_ok=True)
+    pointer.write_text(str(target), encoding="utf-8")
+    return target
 
 
 def memory_path() -> Path:
     return config_path().parent / "memory.jsonl"
 
 
+def todos_path() -> Path:
+    return config_path().parent / "todos.json"
+
+
 def load_config(path: Path | None = None) -> AgentConfig:
     target = path or config_path()
     if not target.exists():
-        return AgentConfig()
+        config = AgentConfig()
+        config.config_dir = str(target.parent.expanduser())
+        return config
     try:
         data = json.loads(target.read_text(encoding="utf-8"))
     except Exception:
-        return AgentConfig()
+        config = AgentConfig()
+        config.config_dir = str(target.parent.expanduser())
+        return config
 
     config = AgentConfig()
     for key in asdict(config):
@@ -349,6 +408,7 @@ def load_config(path: Path | None = None) -> AgentConfig:
             setattr(config, key, data[key])
     config.model = str(config.model or DEFAULT_MODEL)
     config.image_path = str(config.image_path or "").strip()
+    config.config_dir = str(target.parent.expanduser())
     config.click_message = str(config.click_message or DEFAULT_CLICK_MESSAGE)
     if config.click_message in LEGACY_CLICK_MESSAGES:
         config.click_message = DEFAULT_CLICK_MESSAGE
@@ -358,6 +418,13 @@ def load_config(path: Path | None = None) -> AgentConfig:
     config.drop_message = str(config.drop_message or DEFAULT_DROP_MESSAGE)
     if config.drop_message in LEGACY_DROP_MESSAGES:
         config.drop_message = DEFAULT_DROP_MESSAGE
+    try:
+        config.message_seconds = max(
+            MIN_MESSAGE_SECONDS,
+            min(MAX_MESSAGE_SECONDS, float(config.message_seconds)),
+        )
+    except Exception:
+        config.message_seconds = DEFAULT_MESSAGE_SECONDS
     try:
         config.idle_seconds = max(MIN_IDLE_SECONDS, int(config.idle_seconds))
     except Exception:
@@ -539,6 +606,58 @@ def append_memory_turn(user_text: str, assistant_text: str) -> None:
     with path.open("a", encoding="utf-8") as handle:
         for record in records:
             handle.write(json.dumps(record, ensure_ascii=False) + "\n")
+
+
+def load_todos(path: Path | None = None) -> list[dict[str, object]]:
+    target = path or todos_path()
+    if not target.exists():
+        return []
+    try:
+        raw_items = json.loads(target.read_text(encoding="utf-8"))
+    except Exception:
+        return []
+    if not isinstance(raw_items, list):
+        return []
+    todos: list[dict[str, object]] = []
+    for item in raw_items:
+        if not isinstance(item, dict):
+            continue
+        text = str(item.get("text", "")).strip()
+        try:
+            due_ts = int(item.get("due_ts", 0))
+        except Exception:
+            continue
+        if not text or due_ts <= 0:
+            continue
+        todo_id = str(item.get("id") or f"{due_ts}-{len(todos)}")
+        todos.append({"id": todo_id, "text": text, "due_ts": due_ts})
+    return sorted(todos, key=lambda row: int(row["due_ts"]))
+
+
+def save_todos(todos: list[dict[str, object]], path: Path | None = None) -> Path:
+    target = path or todos_path()
+    target.parent.mkdir(parents=True, exist_ok=True)
+    clean_items = load_todos_from_items(todos)
+    target.write_text(json.dumps(clean_items, ensure_ascii=False, indent=2), encoding="utf-8")
+    return target
+
+
+def load_todos_from_items(items: list[dict[str, object]]) -> list[dict[str, object]]:
+    todos: list[dict[str, object]] = []
+    for item in items:
+        text = str(item.get("text", "")).strip()
+        try:
+            due_ts = int(item.get("due_ts", 0))
+        except Exception:
+            continue
+        if not text or due_ts <= 0:
+            continue
+        todos.append({"id": str(item.get("id") or f"{due_ts}-{len(todos)}"), "text": text, "due_ts": due_ts})
+    return sorted(todos, key=lambda row: int(row["due_ts"]))
+
+
+def format_due_time(due_ts: int) -> str:
+    return time.strftime("%Y-%m-%d %H:%M", time.localtime(due_ts))
 
 
 def call_agent(config: AgentConfig, user_text: str) -> str:
@@ -779,7 +898,10 @@ class SettingsDialog(QDialog):
         super().__init__(parent)
         self.setWindowTitle(f"{APP_NAME} 设置")
         self.setStyleSheet(APP_STYLESHEET)
-        self.resize(680, 720)
+        screen = QGuiApplication.primaryScreen()
+        available = screen.availableGeometry() if screen else QRect(0, 0, 1280, 720)
+        self.resize(min(740, max(560, available.width() - 120)), min(760, max(460, available.height() - 120)))
+        self.setMinimumSize(520, 420)
 
         self.url_edit = QLineEdit(config.api_url)
         self.url_edit.setPlaceholderText("OpenAI-compatible base URL, e.g. http://127.0.0.1:8000")
@@ -789,6 +911,14 @@ class SettingsDialog(QDialog):
         self.key_edit.setPlaceholderText("API key")
 
         self.model_edit = QLineEdit(config.model or DEFAULT_MODEL)
+
+        self.config_dir_edit = QLineEdit(config.config_dir or str(config_path().parent))
+        self.config_dir_edit.setPlaceholderText("runtime config directory")
+        config_dir_button = QPushButton("选择")
+        config_dir_button.clicked.connect(self.browse_config_dir)
+        config_dir_row = QHBoxLayout()
+        config_dir_row.addWidget(self.config_dir_edit, 1)
+        config_dir_row.addWidget(config_dir_button)
 
         self.image_edit = QLineEdit(config.image_path or str(DEFAULT_IMAGE))
         self.image_edit.setPlaceholderText("PNG/JPG image path; PNG will be converted to ICO")
@@ -806,6 +936,13 @@ class SettingsDialog(QDialog):
 
         self.drop_message_edit = QLineEdit(config.drop_message or DEFAULT_DROP_MESSAGE)
         self.drop_message_edit.setPlaceholderText("拖放文件/文件夹时显示的话")
+
+        self.message_seconds_spin = QDoubleSpinBox()
+        self.message_seconds_spin.setRange(MIN_MESSAGE_SECONDS, MAX_MESSAGE_SECONDS)
+        self.message_seconds_spin.setSingleStep(0.5)
+        self.message_seconds_spin.setDecimals(1)
+        self.message_seconds_spin.setValue(max(MIN_MESSAGE_SECONDS, min(MAX_MESSAGE_SECONDS, float(config.message_seconds or DEFAULT_MESSAGE_SECONDS))))
+        self.message_seconds_spin.setSuffix(" s")
 
         self.idle_spin = QSpinBox()
         self.idle_spin.setRange(MIN_IDLE_SECONDS, 86400)
@@ -846,10 +983,12 @@ class SettingsDialog(QDialog):
         form.addRow("Agent URL", self.url_edit)
         form.addRow("API Key", self.key_edit)
         form.addRow("Model", self.model_edit)
+        form.addRow("Config directory", config_dir_row)
         form.addRow("Pet image", image_row)
         form.addRow("Click message", self.click_message_edit)
         form.addRow("Idle message", self.idle_message_edit)
         form.addRow("Drop message", self.drop_message_edit)
+        form.addRow("Message duration", self.message_seconds_spin)
         form.addRow("Idle reminder", self.idle_spin)
         form.addRow("Idle mode", self.idle_mode_combo)
         form.addRow("Memory", self.memory_check)
@@ -873,14 +1012,31 @@ class SettingsDialog(QDialog):
         bottom.addStretch(1)
         bottom.addWidget(buttons)
 
+        content = QWidget()
+        content_layout = QVBoxLayout(content)
+        content_layout.setContentsMargins(22, 20, 22, 20)
+        content_layout.setSpacing(14)
+        content_layout.addWidget(title)
+        content_layout.addWidget(subtitle)
+        content_layout.addWidget(hint)
+        content_layout.addLayout(form)
+        content_layout.addStretch(1)
+
+        scroll = QScrollArea()
+        scroll.setWidgetResizable(True)
+        scroll.setFrameShape(QFrame.Shape.NoFrame)
+        scroll.setWidget(content)
+
         layout = QVBoxLayout(self)
-        layout.setContentsMargins(22, 20, 22, 20)
-        layout.setSpacing(14)
-        layout.addWidget(title)
-        layout.addWidget(subtitle)
-        layout.addWidget(hint)
-        layout.addLayout(form)
-        layout.addLayout(bottom)
+        layout.setContentsMargins(0, 0, 0, 0)
+        layout.setSpacing(0)
+        layout.addWidget(scroll, 1)
+        bottom_container = QWidget()
+        bottom_container.setObjectName("settingsFooter")
+        bottom_container.setStyleSheet("#settingsFooter { border-top: 1px solid #263244; background: #111827; }")
+        bottom_container.setLayout(bottom)
+        bottom.setContentsMargins(22, 12, 22, 12)
+        layout.addWidget(bottom_container, 0)
 
     def browse_image(self) -> None:
         current = self.image_edit.text().strip()
@@ -893,6 +1049,12 @@ class SettingsDialog(QDialog):
         )
         if path:
             self.image_edit.setText(path)
+
+    def browse_config_dir(self) -> None:
+        current = self.config_dir_edit.text().strip() or str(config_path().parent)
+        path = QFileDialog.getExistingDirectory(self, "选择配置目录", str(Path(current).expanduser()))
+        if path:
+            self.config_dir_edit.setText(path)
 
     def image_path_value(self) -> str:
         raw_path = self.image_edit.text().strip()
@@ -910,10 +1072,12 @@ class SettingsDialog(QDialog):
             api_url=self.url_edit.text().strip(),
             api_key=self.key_edit.text().strip(),
             model=self.model_edit.text().strip() or DEFAULT_MODEL,
+            config_dir=self.config_dir_edit.text().strip() or str(config_path().parent),
             image_path=self.image_path_value(),
             click_message=self.click_message_edit.text().strip() or DEFAULT_CLICK_MESSAGE,
             idle_message=self.idle_message_edit.text().strip() or DEFAULT_IDLE_MESSAGE,
             drop_message=self.drop_message_edit.text().strip() or DEFAULT_DROP_MESSAGE,
+            message_seconds=float(self.message_seconds_spin.value()),
             idle_seconds=int(self.idle_spin.value()),
             idle_mode=str(self.idle_mode_combo.currentData() or DEFAULT_IDLE_MODE),
             memory_enabled=self.memory_check.isChecked(),
@@ -951,6 +1115,96 @@ class ChatDialog(QDialog):
     def showEvent(self, event) -> None:  # type: ignore[override]
         super().showEvent(event)
         self.text_edit.setFocus(Qt.FocusReason.OtherFocusReason)
+
+
+class TodoDialog(QDialog):
+    def __init__(self, todos: list[dict[str, object]], parent: QWidget | None = None) -> None:
+        super().__init__(parent)
+        self.setWindowTitle("待办提醒")
+        self.setStyleSheet(APP_STYLESHEET)
+        self.resize(560, 460)
+        self.todos = load_todos_from_items(todos)
+
+        header = QHBoxLayout()
+        badge = QLabel()
+        pixmap = QPixmap(str(TODO_BADGE_IMAGE))
+        if not pixmap.isNull():
+            badge.setPixmap(pixmap.scaled(42, 42, Qt.AspectRatioMode.KeepAspectRatio, Qt.TransformationMode.SmoothTransformation))
+        title = QLabel("待办")
+        title_font = QFont()
+        title_font.setPointSize(18)
+        title_font.setWeight(QFont.Weight.Bold)
+        title.setFont(title_font)
+        header.addWidget(badge)
+        header.addWidget(title)
+        header.addStretch(1)
+
+        self.todo_edit = QLineEdit()
+        self.todo_edit.setPlaceholderText("要提醒的事情")
+
+        self.due_edit = QDateTimeEdit(QDateTime.currentDateTime().addSecs(30 * 60))
+        self.due_edit.setCalendarPopup(True)
+        self.due_edit.setDisplayFormat("yyyy-MM-dd HH:mm")
+
+        add_button = QPushButton("添加")
+        add_button.clicked.connect(self.add_todo)
+
+        editor = QHBoxLayout()
+        editor.addWidget(self.todo_edit, 1)
+        editor.addWidget(self.due_edit)
+        editor.addWidget(add_button)
+
+        self.todo_list = QListWidget()
+        self.todo_list.setMinimumHeight(220)
+
+        remove_button = QPushButton("删除选中")
+        remove_button.clicked.connect(self.remove_selected)
+
+        buttons = QDialogButtonBox(QDialogButtonBox.StandardButton.Close)
+        buttons.rejected.connect(self.reject)
+
+        bottom = QHBoxLayout()
+        bottom.addWidget(remove_button)
+        bottom.addStretch(1)
+        bottom.addWidget(buttons)
+
+        layout = QVBoxLayout(self)
+        layout.setContentsMargins(18, 18, 18, 18)
+        layout.setSpacing(12)
+        layout.addLayout(header)
+        layout.addLayout(editor)
+        layout.addWidget(self.todo_list, 1)
+        layout.addLayout(bottom)
+        self.refresh_list()
+
+    def refresh_list(self) -> None:
+        self.todo_list.clear()
+        now_ts = int(time.time())
+        for todo in self.todos:
+            due_ts = int(todo["due_ts"])
+            prefix = "到期" if due_ts <= now_ts else format_due_time(due_ts)
+            item = QListWidgetItem(f"{prefix}  {todo['text']}")
+            item.setData(Qt.ItemDataRole.UserRole, str(todo["id"]))
+            self.todo_list.addItem(item)
+
+    def add_todo(self) -> None:
+        text = self.todo_edit.text().strip()
+        if not text:
+            return
+        due_ts = int(self.due_edit.dateTime().toSecsSinceEpoch())
+        todo = {"id": f"{int(time.time() * 1000)}-{len(self.todos)}", "text": text, "due_ts": due_ts}
+        self.todos.append(todo)
+        self.todos = load_todos_from_items(self.todos)
+        self.todo_edit.clear()
+        self.due_edit.setDateTime(QDateTime.currentDateTime().addSecs(30 * 60))
+        self.refresh_list()
+
+    def remove_selected(self) -> None:
+        ids = {str(item.data(Qt.ItemDataRole.UserRole)) for item in self.todo_list.selectedItems()}
+        if not ids:
+            return
+        self.todos = [todo for todo in self.todos if str(todo["id"]) not in ids]
+        self.refresh_list()
 
 
 class FullScreenIdleAlert(QWidget):
@@ -1082,6 +1336,7 @@ class DesktopMentorPet(QWidget):
         self.pulse_until = 0.0
         self.message_until = 0.0
         self.last_interaction = time.monotonic()
+        self.idle_suppressed_until = 0.0
         self.hovering = False
         self.agent_signals = AgentSignals()
         self.agent_signals.reply_ready.connect(self.show_agent_reply)
@@ -1099,6 +1354,10 @@ class DesktopMentorPet(QWidget):
         self.idle_timer.setInterval(IDLE_CHECK_INTERVAL_MS)
         self.idle_timer.timeout.connect(self.check_idle)
         self.idle_timer.start()
+        self.todo_timer = QTimer(self)
+        self.todo_timer.setInterval(TODO_CHECK_INTERVAL_MS)
+        self.todo_timer.timeout.connect(self.check_todos)
+        self.todo_timer.start()
 
         self.setAttribute(Qt.WidgetAttribute.WA_TranslucentBackground, True)
         self.setAttribute(Qt.WidgetAttribute.WA_AcceptTouchEvents, True)
@@ -1164,7 +1423,13 @@ class DesktopMentorPet(QWidget):
         self.move(area.right() - self.width() - 48, area.bottom() - self.height() - 64)
 
     def show_message(self) -> None:
-        self.show_bubble(self.config.click_message or self.default_message or DEFAULT_CLICK_MESSAGE)
+        self.show_bubble(self.config.click_message or self.default_message or DEFAULT_CLICK_MESSAGE, duration=self.message_duration())
+
+    def message_duration(self) -> float:
+        try:
+            return max(MIN_MESSAGE_SECONDS, min(MAX_MESSAGE_SECONDS, float(self.config.message_seconds)))
+        except Exception:
+            return DEFAULT_MESSAGE_SECONDS
 
     def show_bubble(self, text: str, duration: float = 1.65) -> None:
         now = time.monotonic()
@@ -1182,12 +1447,16 @@ class DesktopMentorPet(QWidget):
         self.update()
 
     def show_agent_reply(self, text: str) -> None:
-        self.show_bubble(text, duration=3.2)
+        self.show_bubble(text, duration=self.message_duration())
 
     def mark_interaction(self) -> None:
         self.last_interaction = time.monotonic()
 
     def check_idle(self) -> None:
+        if time.monotonic() < self.idle_suppressed_until:
+            return
+        if any(int(todo["due_ts"]) <= int(time.time()) for todo in load_todos()):
+            return
         idle_seconds = max(MIN_IDLE_SECONDS, int(self.config.idle_seconds or DEFAULT_IDLE_SECONDS))
         idle_for = system_idle_seconds()
         if idle_for is None:
@@ -1201,7 +1470,7 @@ class DesktopMentorPet(QWidget):
         if self.config.idle_mode == IDLE_MODE_FULLSCREEN:
             self.show_fullscreen_idle(message)
             return
-        self.show_bubble(message, duration=3.2)
+        self.show_bubble(message, duration=self.message_duration())
 
     def clear_fullscreen_alert(self, alert: FullScreenIdleAlert) -> None:
         if self.fullscreen_alert is alert:
@@ -1210,7 +1479,7 @@ class DesktopMentorPet(QWidget):
     def show_fullscreen_idle(self, text: str) -> None:
         if self.fullscreen_alert is not None:
             self.fullscreen_alert.close()
-        alert = FullScreenIdleAlert(text)
+        alert = FullScreenIdleAlert(text, int(self.message_duration() * 1000))
         self.fullscreen_alert = alert
         alert.destroyed.connect(lambda _obj=None, target=alert: self.clear_fullscreen_alert(target))
         alert.show_alert()
@@ -1463,7 +1732,7 @@ class DesktopMentorPet(QWidget):
         self.unsetCursor()
         self.last_drop_paths = [str(path) for path in paths]
         self.last_drop_context = collect_drop_context(paths)
-        self.show_bubble(self.config.drop_message or DEFAULT_DROP_MESSAGE, duration=3.2)
+        self.show_bubble(self.config.drop_message or DEFAULT_DROP_MESSAGE, duration=self.message_duration())
         event.acceptProposedAction()
 
     def mousePressEvent(self, event: QMouseEvent) -> None:  # type: ignore[override]
@@ -1645,18 +1914,21 @@ class DesktopMentorPet(QWidget):
         menu = QMenu(self)
         menu.setStyleSheet(APP_STYLESHEET)
         chat = QAction("对话", self)
+        todo_action = QAction("待办", self)
         settings = QAction("Agent 设置", self)
         quit_action = QAction("退出", self)
         bigger = QAction("放大", self)
         smaller = QAction("缩小", self)
         reset = QAction("回到右下角", self)
         chat.triggered.connect(self.open_chat)
+        todo_action.triggered.connect(self.open_todos)
         settings.triggered.connect(self.open_settings)
         quit_action.triggered.connect(QApplication.quit)
         bigger.triggered.connect(lambda: self.set_pet_size(self.pet_size + 28))
         smaller.triggered.connect(lambda: self.set_pet_size(self.pet_size - 28))
         reset.triggered.connect(self.move_to_lower_right)
         menu.addAction(chat)
+        menu.addAction(todo_action)
         menu.addAction(settings)
         menu.addAction(quit_action)
         menu.addSeparator()
@@ -1671,24 +1943,62 @@ class DesktopMentorPet(QWidget):
         dialog = SettingsDialog(self.config, self)
         if dialog.exec() == QDialog.DialogCode.Accepted:
             old_config = self.config
+            old_config_path = self.config_path
             old_image_path = self.image_path
             old_pixmap = self.pixmap
             new_config = dialog.to_config()
+            requested_config_dir = Path(new_config.config_dir or str(self.config_path.parent)).expanduser()
+            try:
+                resolved_config_dir = requested_config_dir.resolve()
+                resolved_config_dir.mkdir(parents=True, exist_ok=True)
+                new_config.config_dir = str(resolved_config_dir)
+                self.config_path = resolved_config_dir / "config.json"
+            except OSError as exc:
+                self.show_bubble(f"配置目录不可用：{type(exc).__name__}", duration=self.message_duration())
+                return
             self.config = new_config
             if not self.apply_image_from_config(old_image_path):
                 self.config = old_config
+                self.config_path = old_config_path
                 self.image_path = old_image_path
                 self.pixmap = old_pixmap
-                self.show_bubble("形象文件加载失败，设置未保存。", duration=2.8)
+                self.show_bubble("形象文件加载失败，设置未保存。", duration=self.message_duration())
                 return
             icon_error = self.refresh_window_icon()
+            saved_dir = save_config_directory(resolved_config_dir)
+            self.config.config_dir = str(saved_dir)
+            self.config_path = saved_dir / "config.json"
             path = save_config(self.config, self.config_path)
             if self.config.idle_mode != IDLE_MODE_FULLSCREEN and self.fullscreen_alert is not None:
                 self.fullscreen_alert.close()
             if icon_error:
-                self.show_bubble(f"设置已保存，但 ICO 生成失败：{icon_error}", duration=3.4)
+                self.show_bubble(f"设置已保存，但 ICO 生成失败：{icon_error}", duration=self.message_duration())
             else:
-                self.show_bubble(f"设置已保存：{path}", duration=2.6)
+                self.show_bubble(f"设置已保存：{path}", duration=self.message_duration())
+
+    def open_todos(self) -> None:
+        self.mark_interaction()
+        dialog = TodoDialog(load_todos(), self)
+        self.position_dialog_near_pet(dialog)
+        dialog.exec()
+        path = save_todos(dialog.todos)
+        self.show_bubble(f"待办已保存：{path}", duration=self.message_duration())
+
+    def check_todos(self) -> None:
+        now_ts = int(time.time())
+        todos = load_todos()
+        due = [todo for todo in todos if int(todo["due_ts"]) <= now_ts]
+        if not due:
+            return
+        remaining = [todo for todo in todos if int(todo["due_ts"]) > now_ts]
+        save_todos(remaining)
+        if self.fullscreen_alert is not None:
+            self.fullscreen_alert.close()
+        self.idle_suppressed_until = time.monotonic() + max(8.0, self.message_duration() + 3.0)
+        shown = "；".join(str(todo["text"]) for todo in due[:3])
+        if len(due) > 3:
+            shown += f"；还有 {len(due) - 3} 项"
+        self.show_bubble(f"待办提醒：{shown}", duration=self.message_duration())
 
     def open_chat(self) -> None:
         self.mark_interaction()
@@ -1699,7 +2009,7 @@ class DesktopMentorPet(QWidget):
         prompt = dialog.text()
         if not prompt:
             return
-        self.show_bubble("导师处理中，抓紧等。", duration=1.8)
+        self.show_bubble("导师处理中。", duration=min(1.8, self.message_duration()))
         thread = threading.Thread(target=self.fetch_agent_reply, args=(prompt,), daemon=True)
         thread.start()
 
@@ -1960,7 +2270,7 @@ def parse_args(argv: list[str]) -> argparse.Namespace:
     parser.add_argument("--quit-after", type=float, default=0.0, help="exit after N seconds")
     parser.add_argument("--self-test", action="store_true", help="load the app without opening a visible pet")
     parser.add_argument("--make-icon", nargs=2, metavar=("SOURCE_IMAGE", "OUTPUT_ICO"), help="convert a PNG/image file to ICO")
-    parser.add_argument("--ensure-default-icon", action="store_true", help="generate assets/desktop_mentor.ico from assets/default_mentor.png")
+    parser.add_argument("--ensure-default-icon", action="store_true", help="generate assets/desktop_mentor.ico from the default mentor PNG")
     parser.add_argument("--force-icon", action="store_true", help="regenerate ICO even when the target is newer")
     return parser.parse_args(argv)
 
@@ -1990,9 +2300,11 @@ def main(argv: list[str]) -> int:
             "click_message": pet.config.click_message,
             "idle_message": pet.config.idle_message,
             "drop_message": pet.config.drop_message,
+            "message_seconds": pet.config.message_seconds,
             "idle_mode": pet.config.idle_mode,
             "memory_enabled": pet.config.memory_enabled,
             "memory_path": str(memory_path()),
+            "todos_path": str(todos_path()),
             "icon": pet.config.icon_path,
             "icon_error": pet.icon_error,
             "window_size": [pet.width(), pet.height()],
