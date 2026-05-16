@@ -49,4 +49,4 @@ dist\MyDesktopMentor.exe
 %APPDATA%\MyDesktopMentor\config.json
 ```
 
-API key、agent URL、style prompt、idle 提醒话术、点击互动话术、idle 模式和桌宠形象路径都是运行时设置，不写入项目目录。用户在设置里选择 PNG 形象时，程序会自动在 `%APPDATA%\MyDesktopMentor\icons` 下缓存对应 ICO。
+API key、agent URL、style prompt、idle 提醒话术、点击互动话术、drop 话术、idle 模式、记忆开关和桌宠形象路径都是运行时设置，不写入项目目录。用户在设置里选择 PNG 形象时，程序会自动在 `%APPDATA%\MyDesktopMentor\icons` 下缓存对应 ICO。启用记忆后，对话上下文保存在 `%APPDATA%\MyDesktopMentor\memory.jsonl`。

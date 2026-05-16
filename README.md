@@ -1,6 +1,6 @@
 # 我的桌面导师
 
-一个可配置的桌面导师 / 桌宠应用。主程序是 PySide6 写的透明置顶贴纸窗口，支持鼠标和触屏拖动、贴纸旁按钮对话/设置、空闲提醒、文件/文件夹拖放、OpenAI-compatible agent 接口，以及 Windows 打包。
+一个可配置的桌面导师 / 桌宠应用。主程序是 PySide6 写的透明置顶贴纸窗口，支持鼠标和触屏拖动、贴纸旁按钮对话/设置/退出、空闲提醒、文件/文件夹拖放、OpenAI-compatible agent 接口、可选本地对话记忆，以及 Windows 打包。
 
 ## 目录
 
@@ -102,11 +102,18 @@ dist\MyDesktopMentor.exe
 - `Pet image`
 - `Click message`
 - `Idle message`
+- `Drop message`
 - `Idle reminder`
 - `Idle mode`
+- `Memory`
+- `Memory depth`
 - `Style prompt`
 
-贴纸右侧也有两个圆形按钮：上方打开设置，下方打开对话。对话框会贴近桌宠显示，并自动避开屏幕边界。
+贴纸右侧有三个圆形按钮，从上到下是：对话、设置、退出。对话框会贴近桌宠显示，并自动避开屏幕边界。
+
+默认人格是友好的科研导师。这个项目本身是桌面导师框架，用户可以通过设置修改形象、话术、空闲提醒、drop 行为和 style prompt，形成自己的导师桌宠。
+
+启用 `Memory` 后，程序会把最近对话保存在用户配置目录下的 `memory.jsonl`，并在调用 agent 时带上最近若干轮上下文。默认关闭，不会写入项目目录。
 
 用户提供 PNG 形象时，程序会在用户配置目录下自动缓存对应 ICO；默认 PNG 可手动转换：
 
@@ -142,4 +149,5 @@ DESKTOP_MENTOR_CONFIG=/path/to/config.json ./scripts/linux/run_desktop_mentor.sh
 ## 边界
 
 - API key 只写入用户本机运行时配置，不写入项目目录。
+- 对话记忆只在用户开启 `Memory` 时写入用户配置目录，不写入项目目录。
 - `work/` 仍是本地任务目录，不同步进 Codex 主仓库。
