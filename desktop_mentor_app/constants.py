@@ -44,6 +44,7 @@ STICKER_ACTION_LABELS = {
     STICKER_ACTION_DROP_FILE: "拖入文件 drop_file",
     STICKER_ACTION_ERROR: "错误 error",
 }
+STICKER_ALPHA_THRESHOLD = 8
 STICKER_FRAME_INTERVAL_MS = 120
 MAX_STICKER_FRAMES = 64
 STICKER_IMAGE_FILTER = "Images (*.png *.jpg *.jpeg *.webp *.bmp);;All Files (*)"

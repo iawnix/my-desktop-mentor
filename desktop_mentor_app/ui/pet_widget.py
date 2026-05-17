@@ -7,7 +7,7 @@ import time
 from pathlib import Path
 
 from PySide6.QtCore import QObject, QPoint, QPointF, QRect, QRectF, QTimer, Qt, QEvent, Signal
-from PySide6.QtGui import QAction, QColor, QFont, QGuiApplication, QIcon, QMouseEvent, QPainter, QPainterPath, QPen, QPixmap, QFontMetrics
+from PySide6.QtGui import QAction, QColor, QFont, QGuiApplication, QIcon, QImage, QMouseEvent, QPainter, QPainterPath, QPen, QPixmap, QFontMetrics
 from PySide6.QtWidgets import QApplication, QDialog, QMenu, QWidget
 
 from ..agent_client import append_memory_turn, call_agent, compact_text
@@ -63,6 +63,7 @@ from ..constants import (
     MIN_PET_SIZE,
     MIN_TODO_REPEAT_SECONDS,
     STICKER_ACTION_ALERT,
+    STICKER_ALPHA_THRESHOLD,
     STICKER_ACTION_DRAG,
     STICKER_ACTION_DROP_FILE,
     STICKER_ACTION_ERROR,
@@ -184,6 +185,8 @@ class DesktopMentorPet(QWidget):
             self.pixmap = fallback_pixmap
             self.config.image_path = str(image_path)
         self.sticker_frames: dict[str, list[QPixmap]] = {}
+        self.sticker_source_rects: dict[str, QRectF] = {}
+        self.pixmap_content_rect_cache: dict[int, QRectF] = {}
         self.current_action = STICKER_ACTION_IDLE
         self.action_until = 0.0
         self.action_loop = True
@@ -277,6 +280,10 @@ class DesktopMentorPet(QWidget):
             if loaded:
                 frames[action] = loaded
         self.sticker_frames = frames
+        self.sticker_source_rects = {
+            action: self.action_union_source_rect(loaded_frames)
+            for action, loaded_frames in frames.items()
+        }
         self.frame_index = 0
         self.last_frame_at = time.monotonic()
         if any(len(items) > 1 for items in self.sticker_frames.values()):
@@ -295,6 +302,89 @@ class DesktopMentorPet(QWidget):
         if not frames:
             return self.pixmap
         return frames[self.frame_index % len(frames)]
+
+    def action_source_rect(self, action: str) -> QRectF:
+        if action in self.sticker_frames:
+            return QRectF(self.sticker_source_rects.get(action) or QRectF(self.action_frames(action)[0].rect()))
+        if STICKER_ACTION_IDLE in self.sticker_frames:
+            return QRectF(self.sticker_source_rects.get(STICKER_ACTION_IDLE) or QRectF(self.action_frames(STICKER_ACTION_IDLE)[0].rect()))
+        return self.pixmap_content_rect(self.pixmap)
+
+    def current_sticker_source_rect(self) -> QRectF:
+        return self.action_source_rect(self.current_action)
+
+    def action_union_source_rect(self, frames: list[QPixmap]) -> QRectF:
+        union_rect = QRectF()
+        for pixmap in frames:
+            rect = self.pixmap_content_rect(pixmap)
+            union_rect = QRectF(rect) if union_rect.isNull() else union_rect.united(rect)
+        if union_rect.isNull() and frames:
+            return QRectF(frames[0].rect())
+        return union_rect
+
+    def pixmap_content_rect(self, pixmap: QPixmap) -> QRectF:
+        if pixmap.isNull():
+            return QRectF()
+        key = int(pixmap.cacheKey())
+        cached = self.pixmap_content_rect_cache.get(key)
+        if cached is not None:
+            return QRectF(cached)
+
+        image = pixmap.toImage().convertToFormat(QImage.Format.Format_RGBA8888)
+        width = image.width()
+        height = image.height()
+        if width <= 0 or height <= 0:
+            rect = QRectF(pixmap.rect())
+        else:
+            scan_limit = 256
+            if max(width, height) > scan_limit:
+                ratio = scan_limit / max(width, height)
+                scan_width = max(1, int(width * ratio))
+                scan_height = max(1, int(height * ratio))
+                scan_image = image.scaled(
+                    scan_width,
+                    scan_height,
+                    Qt.AspectRatioMode.IgnoreAspectRatio,
+                    Qt.TransformationMode.FastTransformation,
+                ).convertToFormat(QImage.Format.Format_RGBA8888)
+            else:
+                scan_image = image
+                scan_width = width
+                scan_height = height
+
+            bits = scan_image.constBits()
+            bytes_per_line = scan_image.bytesPerLine()
+            left = scan_width
+            right = -1
+            top = scan_height
+            bottom = -1
+            for y in range(scan_height):
+                alpha_row = bits[y * bytes_per_line + 3 : y * bytes_per_line + 3 + scan_width * 4 : 4]
+                row_left = -1
+                row_right = -1
+                for x, alpha in enumerate(alpha_row):
+                    if alpha > STICKER_ALPHA_THRESHOLD:
+                        if row_left < 0:
+                            row_left = x
+                        row_right = x
+                if row_left >= 0:
+                    left = min(left, row_left)
+                    right = max(right, row_right)
+                    if top == scan_height:
+                        top = y
+                    bottom = y
+            if right >= left and bottom >= top:
+                scale_x = width / max(1, scan_width)
+                scale_y = height / max(1, scan_height)
+                source_left = max(0, int(left * scale_x) - 2)
+                source_top = max(0, int(top * scale_y) - 2)
+                source_right = min(width, int((right + 1) * scale_x) + 2)
+                source_bottom = min(height, int((bottom + 1) * scale_y) + 2)
+                rect = QRectF(source_left, source_top, source_right - source_left, source_bottom - source_top)
+            else:
+                rect = QRectF(pixmap.rect())
+        self.pixmap_content_rect_cache[key] = QRectF(rect)
+        return rect
 
     def ensure_animation_timer(self) -> None:
         if not self.pulse_timer.isActive():
@@ -1350,14 +1440,15 @@ class DesktopMentorPet(QWidget):
 
         sticker = self.sticker_rect()
         active_pixmap = self.current_sticker_pixmap()
-        visual = self.pixmap_fit_rect(sticker, active_pixmap)
+        source_rect = self.current_sticker_source_rect()
+        visual = self.pixmap_fit_rect(sticker, source_rect)
         center = sticker.center()
         scale = self.scale()
         painter.save()
         painter.translate(center.x(), center.y())
         painter.scale(scale, scale)
         painter.translate(-center.x(), -center.y())
-        painter.drawPixmap(visual, active_pixmap, QRectF(active_pixmap.rect()))
+        painter.drawPixmap(visual, active_pixmap, source_rect)
         painter.restore()
 
         self.draw_action_buttons(painter)
@@ -1366,9 +1457,9 @@ class DesktopMentorPet(QWidget):
         usable_width = max(self.pet_size, self.width() - self.action_rail_width())
         return QRectF((usable_width - self.pet_size) / 2, self.todo_stack_height + self.bubble_height + 6, self.pet_size, self.pet_size)
 
-    def pixmap_fit_rect(self, target: QRectF, pixmap: QPixmap | None = None) -> QRectF:
-        source = pixmap or self.pixmap
-        image_ratio = source.width() / max(1, source.height())
+    def pixmap_fit_rect(self, target: QRectF, source_rect: QRectF | None = None) -> QRectF:
+        source = source_rect or self.pixmap_content_rect(self.pixmap)
+        image_ratio = source.width() / max(1.0, source.height())
         target_ratio = target.width() / max(1.0, target.height())
         if image_ratio >= target_ratio:
             width = target.width()
@@ -1377,6 +1468,9 @@ class DesktopMentorPet(QWidget):
             height = target.height()
             width = height * image_ratio
         return QRectF(target.center().x() - width / 2, target.center().y() - height / 2, width, height)
+
+    def current_sticker_visual_rect(self) -> QRectF:
+        return self.pixmap_fit_rect(self.sticker_rect(), self.current_sticker_source_rect())
 
     def effect_intensity(self, until: float, duration: float) -> float:
         remaining = until - time.monotonic()
@@ -1413,7 +1507,8 @@ class DesktopMentorPet(QWidget):
         intensity = 1.0 if self.dragging else self.effect_intensity(self.drag_effect_until, DRAG_RELEASE_EFFECT_DURATION)
         if intensity <= 0:
             return
-        sticker = self.sticker_rect().adjusted(-7, -7, 7, 7)
+        pad = max(5.0, min(14.0, self.pet_size * 0.04))
+        sticker = self.current_sticker_visual_rect().adjusted(-pad, -pad, pad, pad)
         painter.save()
         painter.setRenderHint(QPainter.RenderHint.Antialiasing, True)
         painter.setOpacity(0.45 * intensity)
@@ -1421,7 +1516,7 @@ class DesktopMentorPet(QWidget):
         painter.setBrush(QColor(14, 165, 233, 24))
         painter.drawEllipse(sticker)
         painter.setPen(QPen(QColor(255, 255, 255, 150), 1.2))
-        painter.drawArc(sticker.adjusted(7, 7, -7, -7), 25 * 16, 145 * 16)
+        painter.drawArc(sticker.adjusted(pad, pad, -pad, -pad), 25 * 16, 145 * 16)
         painter.restore()
 
     def draw_bubble(self, painter: QPainter) -> None:

@@ -121,6 +121,13 @@ history_chat = ChatDialog(history=history)
 todos = TodoDialog([])
 menu = prepare_modern_menu(QMenu())
 pet = DesktopMentorPet(DEFAULT_IMAGE, DEFAULT_CLICK_MESSAGE, 120)
+pet.config.sticker_sets = discover_sticker_sets(DEFAULT_STICKERS_DIR)
+assert pet.reload_sticker_sets() == []
+bundled_source = pet.current_sticker_source_rect()
+bundled_visual = pet.current_sticker_visual_rect()
+assert bundled_source.width() < 1024 and bundled_source.height() < 1024, bundled_source
+assert bundled_visual.width() < pet.sticker_rect().width(), (bundled_visual, pet.sticker_rect())
+assert bundled_visual.height() <= pet.sticker_rect().height(), (bundled_visual, pet.sticker_rect())
 pet.config.sticker_sets = {
     STICKER_ACTION_IDLE: [str(DEFAULT_IMAGE), str(DEFAULT_IMAGE)],
     STICKER_ACTION_TAP: [str(DEFAULT_IMAGE)],
