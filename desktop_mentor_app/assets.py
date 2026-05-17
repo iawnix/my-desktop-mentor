@@ -24,6 +24,7 @@ ROOT = app_root()
 DEFAULT_IMAGE = ROOT / "assets" / "cow.png"
 DEFAULT_ICON = ROOT / "assets" / "desktop_mentor.ico"
 TODO_BADGE_IMAGE = ROOT / "assets" / "todo_badge.png"
+DEFAULT_STICKERS_DIR = ROOT / "assets" / "stickers"
 
 
 def file_digest(path: Path) -> str:

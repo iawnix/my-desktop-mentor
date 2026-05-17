@@ -11,7 +11,7 @@ from PySide6.QtCore import QTimer
 from PySide6.QtWidgets import QApplication
 
 from desktop_mentor_app.assets import DEFAULT_IMAGE, convert_image_to_ico, ensure_default_icon
-from desktop_mentor_app.config_store import load_config, memory_path, save_config, todos_path
+from desktop_mentor_app.config_store import chat_history_path, load_config, memory_path, save_config, todos_path
 from desktop_mentor_app.constants import APP_NAME, DEFAULT_CLICK_MESSAGE
 from desktop_mentor_app.stickers import discover_sticker_sets, sticker_frame_counts
 from desktop_mentor_app.ui.dialogs import APP_STYLESHEET
@@ -81,6 +81,7 @@ def main(argv: list[str]) -> int:
             "todo_repeat_seconds": pet.config.todo_repeat_seconds,
             "idle_mode": pet.config.idle_mode,
             "memory_enabled": pet.config.memory_enabled,
+            "chat_history_path": str(chat_history_path()),
             "sticker_sets": pet.config.sticker_sets,
             "sticker_frame_counts": pet.sticker_frame_counts(),
             "current_action": pet.current_action,

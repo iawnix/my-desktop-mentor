@@ -13,6 +13,17 @@ from PySide6.QtWidgets import QApplication, QDialog, QMenu, QWidget
 from ..agent_client import append_memory_turn, call_agent, compact_text
 from ..assets import DEFAULT_IMAGE, convert_image_to_ico, ensure_default_icon, icon_cache_path_for_image
 from ..config_store import config_path, load_config, save_config, save_config_directory
+from ..conversation_store import (
+    append_chat_turn,
+    build_conversation_memory_context,
+    clear_chat_history,
+    create_conversation_session,
+    ensure_active_session,
+    get_session,
+    list_conversation_sessions,
+    load_chat_history,
+    set_active_session,
+)
 from ..constants import (
     ACTION_BUTTON_GAP,
     ACTION_BUTTON_MAX_SIZE,
@@ -79,8 +90,8 @@ from .dialogs import ChatDialog, FullScreenIdleAlert, SettingsDialog, TextViewDi
 
 
 class AgentSignals(QObject):
-    reply_ready = Signal(str)
-    error_ready = Signal(str)
+    reply_ready = Signal(str, str)
+    error_ready = Signal(str, str)
 
 
 def as_global_pos(widget: QWidget, event_or_point: object) -> QPoint:
@@ -177,6 +188,7 @@ class DesktopMentorPet(QWidget):
         self.frame_index = 0
         self.last_frame_at = time.monotonic()
         self.fullscreen_alert: FullScreenIdleAlert | None = None
+        self.chat_dialog: ChatDialog | None = None
         self.icon_error = self.refresh_window_icon()
 
         self.dragging = False
@@ -397,11 +409,29 @@ class DesktopMentorPet(QWidget):
         self.ensure_animation_timer()
         self.update()
 
-    def show_agent_reply(self, text: str) -> None:
+    def show_agent_reply(self, text: str, session_id: str = "") -> None:
         self.show_bubble(text, duration=self.message_duration(), action=STICKER_ACTION_SPEAKING)
+        if self.chat_dialog is not None:
+            self.refresh_chat_dialog_sessions()
+        if (
+            self.chat_dialog is not None
+            and self.chat_dialog.waiting_for_reply
+            and (not session_id or self.chat_dialog.active_session_id == session_id)
+        ):
+            self.chat_dialog.add_assistant_message(text)
+            self.chat_dialog.set_waiting(False)
 
-    def show_agent_error(self, text: str) -> None:
+    def show_agent_error(self, text: str, session_id: str = "") -> None:
         self.show_bubble(text, duration=self.message_duration(), action=STICKER_ACTION_ERROR)
+        if self.chat_dialog is not None:
+            self.refresh_chat_dialog_sessions()
+        if (
+            self.chat_dialog is not None
+            and self.chat_dialog.waiting_for_reply
+            and (not session_id or self.chat_dialog.active_session_id == session_id)
+        ):
+            self.chat_dialog.add_assistant_message(text)
+            self.chat_dialog.set_waiting(False)
 
     def mark_interaction(self) -> None:
         self.last_interaction = time.monotonic()
@@ -1136,22 +1166,82 @@ class DesktopMentorPet(QWidget):
 
     def open_chat(self) -> None:
         self.mark_interaction()
-        dialog = ChatDialog(self, self.drop_context_hint())
+        if self.chat_dialog is not None and self.chat_dialog.isVisible():
+            self.chat_dialog.raise_()
+            self.chat_dialog.activateWindow()
+            return
+
+        active_session = ensure_active_session()
+        dialog = ChatDialog(
+            self,
+            self.drop_context_hint(),
+            list_conversation_sessions(),
+            active_session,
+            load_chat_history(active_session.session_id),
+        )
+        dialog.message_submitted.connect(self.handle_chat_message)
+        dialog.session_selected.connect(self.load_chat_session_in_dialog)
+        dialog.new_session_requested.connect(self.create_chat_session_from_dialog)
+        dialog.history_clear_requested.connect(self.clear_chat_history_from_dialog)
+        dialog.finished.connect(lambda _code=0, target=dialog: self.clear_chat_dialog(target))
+        self.chat_dialog = dialog
         self.position_dialog_near_pet(dialog)
-        accepted = dialog.exec() == QDialog.DialogCode.Accepted
-        if dialog.drop_context_was_removed():
+        dialog.show()
+        dialog.raise_()
+        dialog.activateWindow()
+
+    def clear_chat_dialog(self, dialog: ChatDialog) -> None:
+        if self.chat_dialog is dialog:
+            self.chat_dialog = None
+
+    def refresh_chat_dialog_sessions(self) -> None:
+        if self.chat_dialog is None:
+            return
+        active_id = self.chat_dialog.active_session_id or ensure_active_session().session_id
+        session = get_session(active_id) or ensure_active_session()
+        self.chat_dialog.set_sessions(list_conversation_sessions(), session.session_id)
+        self.chat_dialog.set_active_session(session)
+
+    def load_chat_session_in_dialog(self, session_id: str) -> None:
+        session = get_session(session_id)
+        if session is None or self.chat_dialog is None:
+            return
+        set_active_session(session.session_id)
+        self.chat_dialog.set_active_session(session, load_chat_history(session.session_id))
+
+    def create_chat_session_from_dialog(self) -> None:
+        session = create_conversation_session()
+        if self.chat_dialog is not None:
+            self.chat_dialog.set_sessions(list_conversation_sessions(), session.session_id)
+            self.chat_dialog.set_active_session(session, [])
+
+    def clear_chat_history_from_dialog(self, session_id: str) -> None:
+        session = clear_chat_history(session_id)
+        if self.chat_dialog is not None:
+            self.chat_dialog.set_sessions(list_conversation_sessions(), session.session_id)
+            self.chat_dialog.set_active_session(session, [])
+        self.show_bubble("会话历史已清空。", duration=self.message_duration(), action=STICKER_ACTION_TAP)
+
+    def handle_chat_message(self, user_prompt: str, use_drop_context: bool, session_id: str) -> None:
+        self.mark_interaction()
+        if not user_prompt:
+            if self.chat_dialog is not None:
+                self.chat_dialog.set_waiting(False)
+            return
+        if self.chat_dialog is not None and self.chat_dialog.drop_context_was_removed():
             self.last_drop_paths = []
             self.last_drop_context = ""
-        if not accepted:
-            return
-        user_prompt = dialog.text()
-        if not user_prompt:
-            return
-        drop_context = self.last_drop_context if dialog.use_drop_context() else ""
+        drop_context = self.last_drop_context if use_drop_context else ""
         prompt = compose_prompt_with_drop_context(user_prompt, drop_context)
+        active_session = get_session(session_id) or ensure_active_session()
+        set_active_session(active_session.session_id)
         self.show_bubble("导师处理中。", duration=min(1.8, self.message_duration()), action=None)
         self.play_action(STICKER_ACTION_THINKING, loop=True)
-        thread = threading.Thread(target=self.fetch_agent_reply, args=(prompt, user_prompt), daemon=True)
+        thread = threading.Thread(
+            target=self.fetch_agent_reply,
+            args=(prompt, user_prompt, active_session.session_id),
+            daemon=True,
+        )
         thread.start()
 
     def ask_about_dropped_files(self) -> None:
@@ -1161,9 +1251,10 @@ class DesktopMentorPet(QWidget):
             return
         user_prompt = "请先概括这些文件/文件夹的内容，再指出最值得我下一步处理的事项。"
         prompt = compose_prompt_with_drop_context(user_prompt, self.last_drop_context)
+        active_session = ensure_active_session()
         self.show_bubble("导师正在看文件。", duration=min(1.8, self.message_duration()), action=None)
         self.play_action(STICKER_ACTION_THINKING, loop=True)
-        thread = threading.Thread(target=self.fetch_agent_reply, args=(prompt, "只问文件"), daemon=True)
+        thread = threading.Thread(target=self.fetch_agent_reply, args=(prompt, "只问文件", active_session.session_id), daemon=True)
         thread.start()
 
     def open_drop_summary(self) -> None:
@@ -1182,7 +1273,8 @@ class DesktopMentorPet(QWidget):
         self.show_bubble("文件上下文已清除。", duration=self.message_duration())
 
     def position_dialog_near_pet(self, dialog: QDialog) -> None:
-        dialog.adjustSize()
+        if not isinstance(dialog, ChatDialog):
+            dialog.adjustSize()
         size = dialog.size()
         screen = QGuiApplication.screenAt(self.sticker_center_global()) or QGuiApplication.primaryScreen()
         area = screen.availableGeometry() if screen else QRect(0, 0, 1280, 720)
@@ -1203,18 +1295,36 @@ class DesktopMentorPet(QWidget):
         y = min(max(candidates[0].y(), area.top() + margin), area.bottom() - size.height() - margin)
         dialog.move(x, y)
 
-    def fetch_agent_reply(self, prompt: str, memory_prompt: str | None = None) -> None:
+    def fetch_agent_reply(self, prompt: str, memory_prompt: str | None = None, session_id: str = "") -> None:
+        session = get_session(session_id) or ensure_active_session()
+        agent_prompt = prompt
+        if self.config.memory_enabled:
+            try:
+                memory_context = build_conversation_memory_context(session.session_id, self.config.memory_turns)
+            except Exception:
+                memory_context = ""
+            if memory_context:
+                agent_prompt = f"{memory_context}\n\n当前输入:\n{prompt}"
         try:
-            reply = call_agent(self.config, prompt)
+            reply = call_agent(self.config, agent_prompt)
         except Exception as exc:
-            self.agent_signals.error_ready.emit(f"Agent 出错：{type(exc).__name__}: {exc}")
+            reply = f"Agent 出错：{type(exc).__name__}: {exc}"
+            try:
+                append_chat_turn(memory_prompt or prompt, reply, session.session_id)
+            except Exception:
+                pass
+            self.agent_signals.error_ready.emit(reply, session.session_id)
             return
+        try:
+            append_chat_turn(memory_prompt or prompt, reply, session.session_id)
+        except Exception:
+            pass
         if self.config.memory_enabled:
             try:
                 append_memory_turn(memory_prompt or prompt, reply)
             except Exception:
                 pass
-        self.agent_signals.reply_ready.emit(reply)
+        self.agent_signals.reply_ready.emit(reply, session.session_id)
 
     def set_pet_size(self, size: int) -> None:
         old_center = self.sticker_center_global()

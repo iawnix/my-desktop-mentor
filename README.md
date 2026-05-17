@@ -21,8 +21,10 @@
 - `assets/cow.png`：默认桌宠形象。
 - `assets/desktop_mentor.ico`：由默认 PNG 自动生成的 Windows exe 图标。
 - `assets/todo_badge.png`：待办窗口图标。
+- `assets/stickers/`：默认动作贴纸素材，包含 `idle`、`tap`、`drag`、`thinking`、`speaking`、`alert`、`drop_file`、`error` 八类动作，每类 8 帧。
 - `desktop_mentor_app/config_store.py`：运行时配置、配置目录切换、配置迁移和记忆/待办路径。
 - `desktop_mentor_app/assets.py`：默认资源路径、PNG 到 ICO 转换、用户图标缓存。
+- `desktop_mentor_app/conversation_store.py`：本地会话索引、每会话消息 JSONL、摘要/记忆条目和旧历史迁移。
 - `desktop_mentor_app/stickers.py`：动作贴纸集清洗、顺序保留和帧数量统计。
 - `desktop_mentor_app/agent_client.py`：OpenAI-compatible URL 归一化、请求、本地 fallback 和可选记忆拼接。
 - `desktop_mentor_app/todo_store.py`：待办清洗、排序、读写和到期过滤。
@@ -131,11 +133,11 @@ dist\MyDesktopMentor.exe
 - `Memory depth`
 - `Style prompt`
 
-贴纸右侧有三个圆形按钮，从上到下是：对话、设置、退出。对话框会贴近桌宠显示，并自动避开屏幕边界。
+贴纸右侧有三个圆形按钮，从上到下是：对话、设置、退出。对话窗口会贴近桌宠显示，并自动避开屏幕边界。
 
 默认人格是友好的科研导师。这个项目本身是桌面导师框架，用户可以通过设置修改形象、话术、空闲提醒、drop 行为和 style prompt，形成自己的导师桌宠。
 
-`Action stickers` 支持 8 类动作素材，设置页会按动作分组录入图片路径，并按行顺序播放：
+`Action stickers` 默认使用项目内置的 `assets/stickers/`，支持 8 类动作素材，设置页会按动作分组录入图片路径，并按行顺序播放：
 
 - `idle`
 - `tap`
@@ -146,7 +148,7 @@ dist\MyDesktopMentor.exe
 - `drop_file`
 - `error`
 
-每个动作建议准备约 8 张图片；程序不强制数量，1 张会作为静态动作，多张会按 `120 ms/frame` 循环播放。没有配置动作素材时会回退到 `Pet image` 或默认 `assets/cow.png`。这些素材路径只写入用户运行时 `config.json`，不复制到项目目录；后续给素材时，可以在设置页点 `导入动作目录` 选择包含上述 8 个子目录的素材根目录，也可以在对应动作里用“按顺序选择”，或手动按每行一张路径排列。
+每个动作建议准备约 8 张图片；程序不强制数量，1 张会作为静态动作，多张会按 `120 ms/frame` 循环播放。没有用户自定义动作素材时，程序会优先使用项目内置 `assets/stickers/`；若内置素材不可用，再回退到 `Pet image` 或默认 `assets/cow.png`。后续替换素材时，可以在设置页点 `导入动作目录` 选择包含上述 8 个子目录的素材根目录，也可以在对应动作里用“按顺序选择”，或手动按每行一张路径排列。
 
 命令行导入动作目录：
 
@@ -168,9 +170,11 @@ stickers/
   error/*.png
 ```
 
-启用 `Memory` 后，程序会把最近对话保存在用户配置目录下的 `memory.jsonl`，并在调用 agent 时带上最近若干轮上下文。默认关闭，不会写入项目目录。
+对话窗口是本地会话管理器：左侧列出历史会话，右侧显示当前会话记录和本地摘要/记忆提示。新会话、切换会话、清空当前会话都只操作用户配置目录，不写入项目目录。存储位置是 `conversations/sessions.json`、`conversations/active_session.txt` 和每个会话自己的 `conversations/<session-id>.jsonl`；首次升级时会把旧的 `chat_history.jsonl` 或 `memory.jsonl` 迁移成一个会话。
 
-`Config directory` 可以切换运行时设置目录；`config.json`、`memory.jsonl`、`todos.json` 和自动生成的图标缓存都会跟着这个目录走。
+启用 `Memory` 后，程序会把当前会话摘要、命中的记忆条目和最近若干轮消息作为上下文带给 agent；同时保留旧 `memory.jsonl` 作为兼容记忆。默认关闭，不会把历史无条件发给模型，也不会写入项目目录。
+
+`Config directory` 可以切换运行时设置目录；`config.json`、`conversations/`、`chat_history.jsonl`、`memory.jsonl`、`todos.json` 和自动生成的图标缓存都会跟着这个目录走。
 
 右键菜单里的 `待办` 可以添加定时提醒。时间输入框固定为 `年-月-日 时:分:秒` 格式，可直接输入数字。待办到期后会在桌面上生成持久提醒泡泡；泡泡默认不自动消失，点击任意一个同待办泡泡后才确认并删除该待办。若一直不点击，程序会按 `Todo repeat` 间隔移除旧到期事件并追加下一次待办提醒，桌面上会保留累计提醒泡泡。待办泡泡存在时会压制 idle 提醒，避免两套机制同时弹出。
 
@@ -208,12 +212,13 @@ DESKTOP_MENTOR_CONFIG=/path/to/config.json ./scripts/linux/run_desktop_mentor.sh
 - `desktop-file-validate packaging/linux/desktop_mentor.desktop`
 - `python3 -m py_compile packaging/windows/desktop_mentor.spec`
 - `./scripts/linux/self_test.sh`
-- offscreen 设置/动作贴纸/运行时 smoke test
+- offscreen 设置/内置动作贴纸/会话管理/记忆上下文/运行时 smoke test
 - 最终文件列表只包含源码、必要素材、运行/打包脚本、依赖文件和文档。
 
 ## 边界
 
 - API key 只写入用户本机运行时配置，不写入项目目录。
-- 对话记忆只在用户开启 `Memory` 时写入用户配置目录，不写入项目目录。
+- 会话索引、会话历史、对话记忆和待办只写入用户配置目录，不写入项目目录。
 - 待办只写入用户配置目录的 `todos.json`，不写入项目目录。
+- 项目内置贴纸素材保存在 `assets/stickers/`；用户后续导入的外部素材只以路径形式写入运行时配置，除非明确要求打包进项目。
 - `work/` 仍是本地任务目录，不同步进 Codex 主仓库。

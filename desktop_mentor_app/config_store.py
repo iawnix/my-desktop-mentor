@@ -7,6 +7,7 @@ import sys
 from dataclasses import asdict, dataclass, field
 from pathlib import Path
 
+from .assets import DEFAULT_STICKERS_DIR
 from .constants import (
     APP_ID,
     CONFIG_POINTER_NAME,
@@ -32,7 +33,7 @@ from .constants import (
     MIN_MESSAGE_SECONDS,
     MIN_TODO_REPEAT_SECONDS,
 )
-from .stickers import normalize_sticker_sets
+from .stickers import discover_sticker_sets, normalize_sticker_sets
 
 
 @dataclass
@@ -54,6 +55,36 @@ class AgentConfig:
     memory_turns: int = DEFAULT_MEMORY_TURNS
     sticker_sets: dict[str, list[str]] = field(default_factory=dict)
     system_prompt: str = DEFAULT_PERSONALITY_PROMPT
+
+
+def default_sticker_sets() -> dict[str, list[str]]:
+    return discover_sticker_sets(DEFAULT_STICKERS_DIR)
+
+
+def sticker_sets_have_existing_frames(sticker_sets: dict[str, list[str]]) -> bool:
+    for paths in sticker_sets.values():
+        for raw_path in paths:
+            try:
+                if Path(raw_path).expanduser().is_file():
+                    return True
+            except OSError:
+                continue
+    return False
+
+
+def effective_sticker_sets(value: object) -> dict[str, list[str]]:
+    sticker_sets = normalize_sticker_sets(value)
+    if sticker_sets and sticker_sets_have_existing_frames(sticker_sets):
+        return sticker_sets
+    return default_sticker_sets()
+
+
+def new_default_config(config_dir: Path | None = None) -> AgentConfig:
+    config = AgentConfig()
+    config.sticker_sets = default_sticker_sets()
+    if config_dir is not None:
+        config.config_dir = str(config_dir.expanduser())
+    return config
 
 
 def default_config_dir() -> Path:
@@ -152,6 +183,10 @@ def memory_path() -> Path:
     return config_path().parent / "memory.jsonl"
 
 
+def chat_history_path() -> Path:
+    return config_path().parent / "chat_history.jsonl"
+
+
 def todos_path() -> Path:
     return config_path().parent / "todos.json"
 
@@ -159,15 +194,11 @@ def todos_path() -> Path:
 def load_config(path: Path | None = None) -> AgentConfig:
     target = path or config_path()
     if not target.exists():
-        config = AgentConfig()
-        config.config_dir = str(target.parent.expanduser())
-        return config
+        return new_default_config(target.parent)
     try:
         data = json.loads(target.read_text(encoding="utf-8"))
     except Exception:
-        config = AgentConfig()
-        config.config_dir = str(target.parent.expanduser())
-        return config
+        return new_default_config(target.parent)
 
     config = AgentConfig()
     for key in asdict(config):
@@ -176,7 +207,7 @@ def load_config(path: Path | None = None) -> AgentConfig:
     config.model = str(config.model or DEFAULT_MODEL)
     config.image_path = str(config.image_path or "").strip()
     config.icon_path = str(config.icon_path or "").strip()
-    config.sticker_sets = normalize_sticker_sets(config.sticker_sets)
+    config.sticker_sets = effective_sticker_sets(config.sticker_sets)
     config.config_dir = str(target.parent.expanduser())
     config.click_message = str(config.click_message or DEFAULT_CLICK_MESSAGE)
     if config.click_message in LEGACY_CLICK_MESSAGES:

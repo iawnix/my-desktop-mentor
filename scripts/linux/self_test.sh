@@ -50,6 +50,7 @@ step "Python syntax"
   desktop_mentor.py \
   desktop_mentor_app/constants.py \
   desktop_mentor_app/config_store.py \
+  desktop_mentor_app/conversation_store.py \
   desktop_mentor_app/assets.py \
   desktop_mentor_app/stickers.py \
   desktop_mentor_app/todo_store.py \
@@ -92,8 +93,9 @@ from PySide6.QtCore import Qt
 from PySide6.QtWidgets import QApplication, QFrame, QMenu, QPushButton, QScrollArea
 
 from desktop_mentor_app import config_store
-from desktop_mentor_app.assets import DEFAULT_IMAGE, ROOT
-from desktop_mentor_app.config_store import AgentConfig
+from desktop_mentor_app.assets import DEFAULT_IMAGE, DEFAULT_STICKERS_DIR, ROOT
+from desktop_mentor_app.config_store import AgentConfig, new_default_config
+from desktop_mentor_app.conversation_store import append_chat_turn, build_conversation_memory_context, clear_chat_history, load_chat_history, list_conversation_sessions
 from desktop_mentor_app.constants import DEFAULT_CLICK_MESSAGE, STICKER_ACTION_IDLE, STICKER_ACTION_TAP
 from desktop_mentor_app.drop_context import DROP_CONTEXT_PROMPT_HEADER, collect_drop_context, compose_prompt_with_drop_context
 from desktop_mentor_app.stickers import discover_sticker_sets
@@ -103,8 +105,19 @@ from desktop_mentor_app.ui.pet_widget import DesktopMentorPet
 
 app = QApplication([])
 settings = SettingsDialog(AgentConfig())
+default_config = new_default_config()
+assert all(len(paths) == 8 for paths in default_config.sticker_sets.values()), default_config.sticker_sets
+assert len(default_config.sticker_sets) == 8, default_config.sticker_sets
 chat = ChatDialog()
 context_chat = ChatDialog(context_hint="文件上下文：README.md")
+clear_chat_history()
+assert load_chat_history() == []
+managed_session = append_chat_turn("记住我的默认项目是导师桌宠", "已记住")
+history = load_chat_history()
+memory_context = build_conversation_memory_context(managed_session.session_id, 3)
+assert "导师桌宠" in memory_context, memory_context
+assert any(session.session_id == managed_session.session_id for session in list_conversation_sessions())
+history_chat = ChatDialog(history=history)
 todos = TodoDialog([])
 menu = prepare_modern_menu(QMenu())
 pet = DesktopMentorPet(DEFAULT_IMAGE, DEFAULT_CLICK_MESSAGE, 120)
@@ -143,6 +156,17 @@ assert menu.testAttribute(Qt.WidgetAttribute.WA_TranslucentBackground)
 settings.scroll_to_section(2)
 assert any(button.text() == "互动" and button.objectName() == "railNavButtonActive" for button in nav_buttons)
 assert settings.sticker_editor.to_sticker_sets() == {}
+submissions = []
+chat.message_submitted.connect(lambda text, use_context, session_id: submissions.append((text, use_context, session_id)))
+chat.text_edit.setPlainText("新的问题")
+chat.submit_message()
+assert submissions == [("新的问题", False, "")], submissions
+assert chat.waiting_for_reply
+chat.add_assistant_message("新的回答")
+chat.set_waiting(False)
+assert not chat.waiting_for_reply
+assert len(history) == 2, history
+assert len(history_chat.message_widgets) == 2, len(history_chat.message_widgets)
 
 with tempfile.TemporaryDirectory() as sticker_tmp:
     sticker_root = Path(sticker_tmp)
@@ -154,6 +178,9 @@ with tempfile.TemporaryDirectory() as sticker_tmp:
     discovered = discover_sticker_sets(sticker_root)
     assert len(discovered[STICKER_ACTION_IDLE]) == 2, discovered
     assert len(discovered[STICKER_ACTION_TAP]) == 2, discovered
+bundled = discover_sticker_sets(DEFAULT_STICKERS_DIR)
+assert len(bundled) == 8, bundled
+assert all(len(paths) == 8 for paths in bundled.values()), bundled
 assert chat.text() == ""
 assert context_chat.use_drop_context()
 context_chat.remove_drop_context()

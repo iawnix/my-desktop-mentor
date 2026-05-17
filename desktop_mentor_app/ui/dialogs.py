@@ -4,7 +4,7 @@ from __future__ import annotations
 import time
 from pathlib import Path
 
-from PySide6.QtCore import QDateTime, QPoint, QRect, QRectF, QTimer, Qt, QEvent
+from PySide6.QtCore import QDateTime, QPoint, QRect, QRectF, QTimer, Qt, QEvent, Signal
 from PySide6.QtGui import QColor, QFont, QGuiApplication, QMouseEvent, QPainter, QPen, QPixmap
 from PySide6.QtWidgets import (
     QCheckBox,
@@ -33,6 +33,7 @@ from PySide6.QtWidgets import (
 from ..agent_client import compact_text
 from ..assets import DEFAULT_IMAGE, TODO_BADGE_IMAGE
 from ..config_store import AgentConfig, config_path
+from ..conversation_store import ChatHistoryMessage, ConversationSession, format_session_time
 from ..constants import (
     APP_NAME,
     DEFAULT_IDLE_MODE,
@@ -100,6 +101,41 @@ QFrame#contextChip {
     border: 1px solid #2a4161;
     border-radius: 12px;
 }
+QFrame#chatTranscript {
+    background: #0a111d;
+    border: 1px solid #263852;
+    border-radius: 14px;
+}
+QFrame#chatBubbleAssistant {
+    background: #111b2b;
+    border: 1px solid #2a4161;
+    border-radius: 14px;
+}
+QFrame#chatBubbleUser {
+    background: #1e4f7d;
+    border: 1px solid #4a9ad6;
+    border-radius: 14px;
+}
+QFrame#chatComposer {
+    background: #0d1523;
+    border: 1px solid #22324a;
+    border-radius: 14px;
+}
+QFrame#sessionRail {
+    background: #0d1523;
+    border: 1px solid #22324a;
+    border-radius: 14px;
+}
+QFrame#conversationHeader {
+    background: #0d1726;
+    border: 1px solid #25364f;
+    border-radius: 14px;
+}
+QFrame#memoryStrip {
+    background: #101827;
+    border: 1px solid #2a4161;
+    border-radius: 12px;
+}
 QFrame#hairline {
     background: #24364f;
     border: 0;
@@ -137,6 +173,25 @@ QLabel#sectionTitle {
 QLabel#railTitle {
     color: #dce6f3;
     font-size: 15px;
+    font-weight: 700;
+}
+QLabel#chatRole {
+    color: #8da0b8;
+    font-size: 11px;
+    font-weight: 650;
+}
+QLabel#chatText {
+    color: #edf4fb;
+    font-size: 13px;
+    line-height: 1.35em;
+}
+QLabel#chatMeta {
+    color: #72849b;
+    font-size: 11px;
+}
+QLabel#sessionTitle {
+    color: #edf4fb;
+    font-size: 14px;
     font-weight: 700;
 }
 QLineEdit, QTextEdit, QSpinBox, QDoubleSpinBox, QDateTimeEdit, QComboBox, QListWidget {
@@ -202,6 +257,16 @@ QPushButton#primaryButton:hover {
 }
 QPushButton#secondaryButton {
     background: #111b2b;
+}
+QPushButton#quietButton {
+    background: transparent;
+    border: 1px solid #263852;
+    color: #9db0c7;
+}
+QPushButton#quietButton:hover {
+    background: #111b2b;
+    border-color: #447eb2;
+    color: #edf4fb;
 }
 QPushButton#miniButton {
     padding: 8px 12px;
@@ -839,34 +904,142 @@ class SettingsDialog(QDialog):
 
 
 class ChatDialog(QDialog):
-    def __init__(self, parent: QWidget | None = None, context_hint: str = "") -> None:
+    message_submitted = Signal(str, bool, str)
+    session_selected = Signal(str)
+    new_session_requested = Signal()
+    history_clear_requested = Signal(str)
+
+    def __init__(
+        self,
+        parent: QWidget | None = None,
+        context_hint: str = "",
+        sessions: list[ConversationSession] | None = None,
+        active_session: ConversationSession | None = None,
+        history: list[ChatHistoryMessage] | None = None,
+    ) -> None:
         super().__init__(parent)
         self.setWindowTitle(f"问{APP_NAME}")
         setup_modern_dialog(self)
-        self.resize(460, 320)
-        self.setMinimumSize(380, 260)
+        self.resize(840, 680)
+        self.setMinimumSize(700, 480)
         self.context_removed = False
         self.context_check: QCheckBox | None = None
         self.context_chip: QFrame | None = None
+        self.waiting_for_reply = False
+        self.active_session_id = active_session.session_id if active_session is not None else ""
+        self.message_widgets: list[QWidget] = []
+
+        self.status_label = styled_label("就绪", "mutedLabel")
+        self.session_title_label = styled_label("新会话", "dialogTitle")
+        self.session_meta_label = styled_label("", "mutedLabel")
+        self.memory_label = styled_label("暂无会话记忆", "mutedLabel", True)
+
+        self.session_list = QListWidget()
+        self.session_list.setMinimumWidth(210)
+        self.session_list.setMaximumWidth(250)
+        self.session_list.itemSelectionChanged.connect(self.emit_selected_session)
+
+        new_button = QPushButton("新会话")
+        mark_button(new_button, "primaryButton")
+        new_button.clicked.connect(self.new_session_requested.emit)
+
+        clear_button = QPushButton("清空当前")
+        mark_button(clear_button, "quietButton")
+        clear_button.clicked.connect(self.request_clear_history)
+
+        self.history_content = QWidget()
+        self.history_layout = QVBoxLayout(self.history_content)
+        self.history_layout.setContentsMargins(12, 12, 12, 12)
+        self.history_layout.setSpacing(10)
+        self.history_layout.setAlignment(Qt.AlignmentFlag.AlignTop)
+
+        self.history_scroll = QScrollArea()
+        self.history_scroll.setWidgetResizable(True)
+        self.history_scroll.setFrameShape(QFrame.Shape.NoFrame)
+        self.history_scroll.setHorizontalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAlwaysOff)
+        self.history_scroll.setWidget(self.history_content)
 
         self.text_edit = QTextEdit()
-        self.text_edit.setPlaceholderText("你要问什么")
-        self.text_edit.setMinimumHeight(150)
+        self.text_edit.setObjectName("chatInput")
+        self.text_edit.setPlaceholderText("输入问题、目标或文件处理需求")
+        self.text_edit.setMinimumHeight(82)
+        self.text_edit.setMaximumHeight(118)
 
-        buttons = QDialogButtonBox(QDialogButtonBox.StandardButton.Ok | QDialogButtonBox.StandardButton.Cancel)
-        buttons.button(QDialogButtonBox.StandardButton.Ok).setText("发送")
-        buttons.button(QDialogButtonBox.StandardButton.Cancel).setText("取消")
-        style_dialog_buttons(buttons, QDialogButtonBox.StandardButton.Ok)
-        buttons.accepted.connect(self.accept)
-        buttons.rejected.connect(self.reject)
+        send_button = QPushButton("发送")
+        mark_button(send_button, "primaryButton")
+        send_button.clicked.connect(self.submit_message)
+        self.send_button = send_button
+
+        dialog_close_button = QPushButton("关闭")
+        mark_button(dialog_close_button, "secondaryButton")
+        dialog_close_button.clicked.connect(self.reject)
 
         panel = QFrame()
         panel.setObjectName("glassPanel")
         panel_layout = QVBoxLayout(panel)
         panel_layout.setContentsMargins(16, 15, 16, 16)
         panel_layout.setSpacing(12)
-        panel_layout.addWidget(styled_label("对话", "dialogTitle"))
-        panel_layout.addWidget(styled_label("把问题、目标或文件处理需求直接发给导师。", "dialogSubtitle", True))
+
+        body = QHBoxLayout()
+        body.setContentsMargins(0, 0, 0, 0)
+        body.setSpacing(12)
+
+        rail = QFrame()
+        rail.setObjectName("sessionRail")
+        rail_layout = QVBoxLayout(rail)
+        rail_layout.setContentsMargins(10, 10, 10, 10)
+        rail_layout.setSpacing(10)
+        rail_layout.addWidget(styled_label("会话", "railTitle"))
+        rail_layout.addWidget(self.session_list, 1)
+        rail_buttons = QHBoxLayout()
+        rail_buttons.setContentsMargins(0, 0, 0, 0)
+        rail_buttons.setSpacing(8)
+        rail_buttons.addWidget(new_button)
+        rail_buttons.addWidget(clear_button)
+        rail_layout.addLayout(rail_buttons)
+        body.addWidget(rail, 0)
+
+        conversation = QVBoxLayout()
+        conversation.setContentsMargins(0, 0, 0, 0)
+        conversation.setSpacing(12)
+
+        header = QFrame()
+        header.setObjectName("conversationHeader")
+        header_layout = QVBoxLayout(header)
+        header_layout.setContentsMargins(12, 10, 12, 10)
+        header_layout.setSpacing(5)
+        title_row = QHBoxLayout()
+        title_row.setContentsMargins(0, 0, 0, 0)
+        title_row.setSpacing(10)
+        title_box = QVBoxLayout()
+        title_box.setContentsMargins(0, 0, 0, 0)
+        title_box.setSpacing(2)
+        title_box.addWidget(self.session_title_label)
+        title_box.addWidget(self.session_meta_label)
+        title_row.addLayout(title_box, 1)
+        title_row.addWidget(self.status_label)
+        header_layout.addLayout(title_row)
+        memory_strip = QFrame()
+        memory_strip.setObjectName("memoryStrip")
+        memory_layout = QVBoxLayout(memory_strip)
+        memory_layout.setContentsMargins(10, 7, 10, 7)
+        memory_layout.addWidget(self.memory_label)
+        header_layout.addWidget(memory_strip)
+        conversation.addWidget(header, 0)
+
+        transcript = QFrame()
+        transcript.setObjectName("chatTranscript")
+        transcript_layout = QVBoxLayout(transcript)
+        transcript_layout.setContentsMargins(0, 0, 0, 0)
+        transcript_layout.setSpacing(0)
+        transcript_layout.addWidget(self.history_scroll)
+        conversation.addWidget(transcript, 1)
+
+        composer = QFrame()
+        composer.setObjectName("chatComposer")
+        composer_layout = QVBoxLayout(composer)
+        composer_layout.setContentsMargins(12, 12, 12, 12)
+        composer_layout.setSpacing(10)
         if context_hint:
             self.context_chip = QFrame()
             self.context_chip.setObjectName("contextChip")
@@ -877,13 +1050,24 @@ class ChatDialog(QDialog):
             self.context_check.setChecked(True)
             chip_layout.addWidget(self.context_check)
             chip_layout.addWidget(styled_label(context_hint, "mutedLabel", True), 1)
-            close_button = QPushButton("x")
-            mark_button(close_button, "chipCloseButton")
-            close_button.clicked.connect(self.remove_drop_context)
-            chip_layout.addWidget(close_button)
-            panel_layout.addWidget(self.context_chip)
-        panel_layout.addWidget(self.text_edit, 1)
-        panel_layout.addWidget(buttons, 0)
+            chip_close_button = QPushButton("x")
+            mark_button(chip_close_button, "chipCloseButton")
+            chip_close_button.clicked.connect(self.remove_drop_context)
+            chip_layout.addWidget(chip_close_button)
+            composer_layout.addWidget(self.context_chip)
+        composer_layout.addWidget(self.text_edit)
+
+        composer_buttons = QHBoxLayout()
+        composer_buttons.setContentsMargins(0, 0, 0, 0)
+        composer_buttons.setSpacing(10)
+        composer_buttons.addStretch(1)
+        composer_buttons.addWidget(dialog_close_button)
+        composer_buttons.addWidget(send_button)
+        composer_layout.addLayout(composer_buttons)
+        conversation.addWidget(composer, 0)
+
+        body.addLayout(conversation, 1)
+        panel_layout.addLayout(body, 1)
 
         shell = QFrame()
         shell.setObjectName("dialogShell")
@@ -901,9 +1085,165 @@ class ChatDialog(QDialog):
         layout.setContentsMargins(10, 10, 10, 10)
         layout.setSpacing(0)
         layout.addWidget(shell)
+        self.set_sessions(sessions or [], self.active_session_id)
+        self.set_active_session(active_session, history or [])
 
     def text(self) -> str:
         return self.text_edit.toPlainText().strip()
+
+    def set_sessions(self, sessions: list[ConversationSession], active_session_id: str) -> None:
+        self.session_list.blockSignals(True)
+        self.session_list.clear()
+        for session in sessions:
+            title = session.title or "新会话"
+            meta = f"{format_session_time(session.updated_at)} · {session.message_count} 条"
+            item = QListWidgetItem(f"{title}\n{meta}")
+            item.setData(Qt.ItemDataRole.UserRole, session.session_id)
+            self.session_list.addItem(item)
+            if session.session_id == active_session_id:
+                self.session_list.setCurrentItem(item)
+        self.session_list.blockSignals(False)
+
+    def set_active_session(
+        self,
+        session: ConversationSession | None,
+        messages: list[ChatHistoryMessage] | None = None,
+    ) -> None:
+        if session is not None:
+            self.active_session_id = session.session_id
+            self.session_title_label.setText(session.title or "新会话")
+            self.session_meta_label.setText(
+                f"{format_session_time(session.updated_at)} · {session.message_count} 条消息"
+            )
+            if session.memory_items:
+                preview = " · ".join(session.memory_items[-2:])
+                self.memory_label.setText(f"记忆 {len(session.memory_items)} 条：{preview}")
+            elif session.summary:
+                self.memory_label.setText(f"摘要：{session.summary}")
+            else:
+                self.memory_label.setText("暂无会话记忆")
+        else:
+            self.active_session_id = ""
+            self.session_title_label.setText("新会话")
+            self.session_meta_label.setText("")
+            self.memory_label.setText("暂无会话记忆")
+        if messages is not None:
+            self.set_history(messages)
+
+    def emit_selected_session(self) -> None:
+        items = self.session_list.selectedItems()
+        if not items:
+            return
+        session_id = str(items[0].data(Qt.ItemDataRole.UserRole) or "")
+        if session_id and session_id != self.active_session_id:
+            self.session_selected.emit(session_id)
+
+    def set_history(self, messages: list[ChatHistoryMessage]) -> None:
+        self.clear_history_view()
+        if not messages:
+            self.add_empty_state()
+            return
+        for message in messages:
+            self.add_message(message.role, message.content, message.ts)
+        self.scroll_to_bottom()
+
+    def clear_history_view(self) -> None:
+        while self.history_layout.count():
+            item = self.history_layout.takeAt(0)
+            widget = item.widget()
+            if widget is not None:
+                widget.deleteLater()
+        self.message_widgets = []
+
+    def add_empty_state(self) -> None:
+        empty = styled_label("暂无会话", "mutedLabel")
+        empty.setAlignment(Qt.AlignmentFlag.AlignCenter)
+        empty.setMinimumHeight(180)
+        self.history_layout.addWidget(empty)
+        self.message_widgets = [empty]
+
+    def remove_empty_state(self) -> None:
+        if len(self.message_widgets) != 1:
+            return
+        widget = self.message_widgets[0]
+        if isinstance(widget, QLabel) and widget.text() == "暂无会话":
+            self.history_layout.removeWidget(widget)
+            widget.deleteLater()
+            self.message_widgets = []
+
+    def add_message(self, role: str, content: str, ts: int | None = None) -> None:
+        text = str(content or "").strip()
+        if not text:
+            return
+        role = "assistant" if role == "assistant" else "user"
+        self.remove_empty_state()
+
+        row = QWidget()
+        row_layout = QHBoxLayout(row)
+        row_layout.setContentsMargins(0, 0, 0, 0)
+        row_layout.setSpacing(8)
+
+        bubble = QFrame()
+        bubble.setObjectName("chatBubbleUser" if role == "user" else "chatBubbleAssistant")
+        bubble.setMaximumWidth(520)
+        bubble_layout = QVBoxLayout(bubble)
+        bubble_layout.setContentsMargins(12, 10, 12, 10)
+        bubble_layout.setSpacing(5)
+
+        role_label = styled_label("你" if role == "user" else APP_NAME, "chatRole")
+        message_label = styled_label(text, "chatText", True)
+        message_label.setTextInteractionFlags(Qt.TextInteractionFlag.TextSelectableByMouse)
+        meta_label = styled_label(self.format_message_time(ts), "chatMeta")
+        bubble_layout.addWidget(role_label)
+        bubble_layout.addWidget(message_label)
+        bubble_layout.addWidget(meta_label)
+
+        if role == "user":
+            row_layout.addStretch(1)
+            row_layout.addWidget(bubble, 0)
+        else:
+            row_layout.addWidget(bubble, 0)
+            row_layout.addStretch(1)
+        self.history_layout.addWidget(row)
+        self.message_widgets.append(row)
+        self.scroll_to_bottom()
+
+    def add_user_message(self, content: str) -> None:
+        self.add_message("user", content, int(time.time()))
+
+    def add_assistant_message(self, content: str) -> None:
+        self.add_message("assistant", content, int(time.time()))
+
+    @staticmethod
+    def format_message_time(ts: int | None) -> str:
+        if not ts:
+            return ""
+        try:
+            return time.strftime("%H:%M", time.localtime(int(ts)))
+        except Exception:
+            return ""
+
+    def scroll_to_bottom(self) -> None:
+        QTimer.singleShot(0, lambda: self.history_scroll.verticalScrollBar().setValue(self.history_scroll.verticalScrollBar().maximum()))
+
+    def set_waiting(self, waiting: bool) -> None:
+        self.waiting_for_reply = waiting
+        self.send_button.setEnabled(not waiting)
+        self.status_label.setText("导师正在思考" if waiting else "就绪")
+
+    def submit_message(self) -> None:
+        if self.waiting_for_reply:
+            return
+        user_text = self.text()
+        if not user_text:
+            return
+        self.text_edit.clear()
+        self.add_user_message(user_text)
+        self.set_waiting(True)
+        self.message_submitted.emit(user_text, self.use_drop_context(), self.active_session_id)
+
+    def request_clear_history(self) -> None:
+        self.history_clear_requested.emit(self.active_session_id)
 
     def use_drop_context(self) -> bool:
         return self.context_check is not None and self.context_check.isChecked() and not self.context_removed
