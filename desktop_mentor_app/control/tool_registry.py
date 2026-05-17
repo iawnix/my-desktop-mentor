@@ -1,9 +1,11 @@
 """Build controlled operation plans from chat commands."""
 from __future__ import annotations
 
-import secrets
 import os
+import re
+import secrets
 import shlex
+import time
 from pathlib import Path
 
 from .permissions import can_read_path, can_run_command, can_write_path, control_workspace, resolve_user_path
@@ -35,6 +37,9 @@ HELP_TEXT = """电脑控制命令：
 /mkdir <路径>、/touch <路径>：确认后创建目录或文件
 /write <路径> :: <内容>、/append <路径> :: <内容>：确认后写入或追加文本
 """
+
+WRITABLE_TEXT_SUFFIXES = (".txt", ".md", ".log", ".csv", ".json")
+WINDOWS_FORBIDDEN_FILENAME_CHARS = re.compile(r'[<>:"/\\|?*\x00-\x1f]')
 
 
 def new_plan_id() -> str:
@@ -88,6 +93,164 @@ def parse_run_args(tokens: list[str], workspace: Path) -> tuple[Path, list[str]]
     return cwd, remaining
 
 
+def expand_xdg_user_dir(raw_value: str) -> Path | None:
+    value = str(raw_value or "").strip().strip("'\"")
+    if not value:
+        return None
+    home_text = str(Path.home().expanduser())
+    value = value.replace("${HOME}", home_text).replace("$HOME", home_text)
+    return Path(value).expanduser()
+
+
+def configured_desktop_path() -> Path | None:
+    env_path = expand_xdg_user_dir(os.environ.get("XDG_DESKTOP_DIR", ""))
+    if env_path is not None:
+        return env_path
+    config_home = Path(os.environ.get("XDG_CONFIG_HOME") or Path.home().expanduser() / ".config").expanduser()
+    user_dirs = config_home / "user-dirs.dirs"
+    try:
+        lines = user_dirs.read_text(encoding="utf-8").splitlines()
+    except OSError:
+        return None
+    for line in lines:
+        clean = line.strip()
+        if not clean or clean.startswith("#") or not clean.startswith("XDG_DESKTOP_DIR="):
+            continue
+        _key, _sep, raw_value = clean.partition("=")
+        return expand_xdg_user_dir(raw_value)
+    return None
+
+
+def desktop_path() -> Path:
+    home = Path.home().expanduser()
+    configured = configured_desktop_path()
+    if configured is not None:
+        return configured.resolve(strict=False)
+    candidates = [home / "Desktop", home / "桌面"]
+    unique_candidates: list[Path] = []
+    seen: set[str] = set()
+    for candidate in candidates:
+        key = str(candidate)
+        if key not in seen:
+            unique_candidates.append(candidate)
+            seen.add(key)
+    for candidate in unique_candidates:
+        if candidate.exists():
+            return candidate.resolve(strict=False)
+    return unique_candidates[0].resolve(strict=False) if unique_candidates else (home / "Desktop").resolve(strict=False)
+
+
+def quoted_segments(text: str) -> list[str]:
+    segments: list[str] = []
+    patterns = (
+        r"`([^`]+)`",
+        r"「([^」]+)」",
+        r"『([^』]+)』",
+        r"“([^”]+)”",
+        r"\"([^\"]+)\"",
+        r"'([^']+)'",
+    )
+    for pattern in patterns:
+        segments.extend(match.group(1).strip() for match in re.finditer(pattern, text) if match.group(1).strip())
+    return segments
+
+
+def looks_like_filename(value: str) -> bool:
+    lowered = value.strip().lower()
+    return any(lowered.endswith(suffix) for suffix in WRITABLE_TEXT_SUFFIXES)
+
+
+def safe_desktop_filename(value: str) -> str:
+    name = WINDOWS_FORBIDDEN_FILENAME_CHARS.sub("-", str(value or "").strip())
+    name = re.sub(r"\s+", " ", name).strip(" .")
+    if not name or name in {".", ".."}:
+        stamp = time.strftime("%Y%m%d-%H%M%S")
+        return f"desktop-mentor-note-{stamp}.txt"
+    if not looks_like_filename(name):
+        name = f"{name}.txt"
+    return name
+
+
+def extract_filename(text: str) -> str:
+    for segment in quoted_segments(text):
+        if looks_like_filename(segment):
+            return safe_desktop_filename(segment)
+    match = re.search(r"([A-Za-z0-9_\-\u4e00-\u9fff][A-Za-z0-9_\-\u4e00-\u9fff .]*\.(?:txt|md|log|csv|json))", text, re.IGNORECASE)
+    if match:
+        return safe_desktop_filename(match.group(1))
+    name_match = re.search(
+        r"(?:文件名|名字|命名为|名为|叫)[是为叫：:\s]*([A-Za-z0-9_\-\u4e00-\u9fff][A-Za-z0-9_\-\u4e00-\u9fff .]{0,48})",
+        text,
+    )
+    if name_match:
+        raw_name = name_match.group(1).split("文件", 1)[0].strip(" ，。；;,")
+        if raw_name:
+            return safe_desktop_filename(raw_name)
+    stamp = time.strftime("%Y%m%d-%H%M%S")
+    return f"desktop-mentor-note-{stamp}.txt"
+
+
+def extract_write_content(text: str) -> str:
+    markers = (
+        "内容是",
+        "内容为",
+        "内容：",
+        "内容:",
+        "写入：",
+        "写入:",
+        "写上：",
+        "写上:",
+        "写一段话：",
+        "写一段话:",
+        "写一句话：",
+        "写一句话:",
+    )
+    for marker in markers:
+        if marker in text:
+            tail = text.split(marker, 1)[1].strip()
+            segments = quoted_segments(tail)
+            content = segments[0] if segments else tail
+            return content.strip("，。；; ")
+    segments = quoted_segments(text)
+    for segment in segments:
+        if not looks_like_filename(segment):
+            return segment
+    return ""
+
+
+def build_natural_language_plan(text: str, workspace: Path) -> ControlPlan | None:
+    normalized = " ".join(text.split())
+    lowered = normalized.lower()
+    mentions_desktop = "桌面" in normalized or "desktop" in lowered
+    wants_file_change = any(keyword in normalized for keyword in ("创建", "新建", "生成", "写入", "写上", "保存"))
+    mentions_file = "文件" in normalized or any(suffix in lowered for suffix in WRITABLE_TEXT_SUFFIXES)
+    wants_write = any(keyword in normalized for keyword in ("写", "写入", "写上", "内容"))
+    if not (mentions_desktop and wants_file_change and mentions_file and wants_write):
+        return None
+
+    filename = extract_filename(normalized)
+    content = extract_write_content(normalized)
+    if not content:
+        return None
+    target = (desktop_path() / filename).expanduser().resolve(strict=False)
+    permission, reason = can_write_path(target)
+    if permission == PermissionLevel.BLOCKED:
+        return blocked_plan(text, "创建桌面文件被阻止", reason, [f"目标：{target}"])
+    return ControlPlan(
+        new_plan_id(),
+        text,
+        "write_file",
+        "创建并写入桌面文件",
+        [
+            f"目标文件：{target}",
+            f"写入内容预览：{content[:120]}",
+            f"写入字符数：{len(content)}",
+        ],
+        {"path": str(target), "content": content},
+        PermissionLevel.USER_APPROVAL,
+    )
+
+
 def blocked_plan(source_text: str, title: str, reason: str, steps: list[str] | None = None) -> ControlPlan:
     return ControlPlan(
         plan_id=new_plan_id(),
@@ -105,13 +268,13 @@ def build_control_plan(user_text: str, raw_workspace: str = "") -> ControlPlan |
     if not text:
         return None
     is_control = text.startswith("/") or text.startswith("@电脑") or text.startswith("电脑")
+    workspace = control_workspace(raw_workspace)
     if not is_control:
-        return None
+        return build_natural_language_plan(text, workspace)
     command, tokens, body = split_command(text)
     if command not in CONTROL_COMMANDS:
         return None
 
-    workspace = control_workspace(raw_workspace)
     plan_id = new_plan_id()
     if command == "help":
         return ControlPlan(plan_id, text, "help", "电脑控制帮助", ["显示可用命令。"], {"help": HELP_TEXT})

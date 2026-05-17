@@ -33,9 +33,16 @@ class ControlPlan:
         return self.permission == PermissionLevel.BLOCKED
 
     def summary(self) -> str:
-        lines = [self.title, f"权限：{self.permission.value}"]
+        permission_labels = {
+            PermissionLevel.READ_ONLY: "只读，直接执行",
+            PermissionLevel.USER_APPROVAL: "需要你的授权",
+            PermissionLevel.BLOCKED: "已阻止",
+        }
+        lines = [f"我准备执行：{self.title}", f"权限：{permission_labels.get(self.permission, self.permission.value)}"]
         if self.blocked_reason:
             lines.append(f"阻止原因：{self.blocked_reason}")
+        if self.requires_confirmation:
+            lines.append("确认前不会修改电脑；点“授权执行”后才会开始。")
         lines.extend(f"{index}. {step}" for index, step in enumerate(self.steps, start=1))
         return "\n".join(lines)
 

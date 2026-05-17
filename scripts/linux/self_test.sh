@@ -105,6 +105,7 @@ from desktop_mentor_app import config_store
 from desktop_mentor_app.assets import DEFAULT_IMAGE, DEFAULT_STICKERS_DIR, ROOT
 from desktop_mentor_app.config_store import AgentConfig, new_default_config
 from desktop_mentor_app.control import PermissionLevel, build_control_plan, execute_control_plan
+from desktop_mentor_app.control.tool_registry import desktop_path
 from desktop_mentor_app.conversation_store import append_chat_turn, build_conversation_memory_context, clear_chat_history, create_conversation_session, load_chat_history, list_conversation_sessions
 from desktop_mentor_app.constants import DEFAULT_CLICK_MESSAGE, MAX_IDLE_SECONDS, MAX_PET_SIZE, MIN_PET_SIZE, STICKER_ACTION_IDLE, STICKER_ACTION_TAP
 from desktop_mentor_app.drop_context import DROP_CONTEXT_PROMPT_HEADER, collect_drop_context, compose_prompt_with_drop_context
@@ -273,6 +274,9 @@ with tempfile.TemporaryDirectory() as tmp:
     assert loaded_messages.idle_seconds == MAX_IDLE_SECONDS
     assert loaded_messages.memory_enabled is False
     assert loaded_messages.control_enabled is True
+    configured_desktop = Path(tmp) / "configured-desktop"
+    (Path(tmp) / "user-dirs.dirs").write_text(f'XDG_DESKTOP_DIR="{configured_desktop}"\n', encoding="utf-8")
+    assert desktop_path() == configured_desktop.resolve(strict=False)
     control_root = Path(tmp) / "control-root"
     control_root.mkdir()
     (control_root / "input.txt").write_text("alpha\nbeta\n", encoding="utf-8")
@@ -293,6 +297,21 @@ with tempfile.TemporaryDirectory() as tmp:
     assert write_plan is not None and write_plan.requires_confirmation
     write_result = execute_control_plan(write_plan)
     assert write_result.ok and (control_root / "output.txt").read_text(encoding="utf-8").strip() == "hello"
+    nl_plan = build_control_plan("请在桌面创建一个文件 `mentor-note.txt`，内容是「hello mentor」", str(control_root))
+    assert nl_plan is not None and nl_plan.requires_confirmation
+    assert nl_plan.action == "write_file", nl_plan
+    assert Path(str(nl_plan.args["path"])) == configured_desktop.resolve(strict=False) / "mentor-note.txt"
+    assert nl_plan.args["content"] == "hello mentor"
+    assert "需要你的授权" in nl_plan.summary()
+    assert "授权执行" in nl_plan.summary()
+    nl_result = execute_control_plan(nl_plan)
+    assert nl_result.ok and (configured_desktop / "mentor-note.txt").read_text(encoding="utf-8").strip() == "hello mentor"
+    safe_name_plan = build_control_plan("请在桌面创建 `../bad.txt`，内容是「safe」", str(control_root))
+    assert safe_name_plan is not None
+    safe_name_path = Path(str(safe_name_plan.args["path"]))
+    assert safe_name_path.parent == configured_desktop.resolve(strict=False)
+    assert ".." not in safe_name_path.name
+    assert build_control_plan("我们聊一下怎么设计桌面应用和文件结构", str(control_root)) is None
     run_plan = build_control_plan(
         f"/run --cwd {shlex.quote(str(control_root))} {shlex.quote(sys.executable)} -c \"print('mentor-control')\"",
         str(control_root),

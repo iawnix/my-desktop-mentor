@@ -53,7 +53,7 @@ API key、agent URL、style prompt、idle 提醒话术、点击互动话术、dr
 
 ## 电脑控制
 
-对话窗口支持受控电脑操作命令。Windows 下读操作会直接执行；打开路径、运行命令、创建或写入文件会先显示操作计划，需要点击 `执行` 才会动手。操作记录写入：
+对话窗口支持受控电脑操作。Windows 下读操作会直接执行；打开路径、运行命令、创建或写入文件会先显示授权卡片，需要点击 `授权执行` 才会动手。明确的自然语言桌面写文件请求也会进入授权流程。操作记录写入：
 
 ```text
 %APPDATA%\MyDesktopMentor\control\audit.jsonl
@@ -69,6 +69,7 @@ API key、agent URL、style prompt、idle 提醒话术、点击互动话术、dr
 /open C:\Users\you\Desktop
 /run --cwd C:\Users\you\project python --version
 /write notes.txt :: hello
+请在桌面创建一个文件 `mentor-note.txt`，内容是「hello」
 ```
 
 第一版不支持删除文件，不通过 `cmd /c`、`powershell -Command` 这类 shell 字符串执行任意命令，也会阻止看起来包含 token、secret、password、credential、SSH 私钥等敏感名称的路径。

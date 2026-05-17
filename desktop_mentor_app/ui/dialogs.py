@@ -1298,18 +1298,20 @@ class ChatDialog(QDialog):
         card_layout = QVBoxLayout(card)
         card_layout.setContentsMargins(12, 10, 12, 10)
         card_layout.setSpacing(8)
-        card_layout.addWidget(styled_label(title, "chatRole"))
+        card_layout.addWidget(styled_label(f"授权请求 · {title}" if requires_confirmation else title, "chatRole"))
+        if requires_confirmation:
+            card_layout.addWidget(styled_label("请确认目标和内容，授权前不会执行。", "chatMeta"))
         detail_label = styled_label(details, "chatText", True)
         detail_label.setTextInteractionFlags(Qt.TextInteractionFlag.TextSelectableByMouse)
         card_layout.addWidget(detail_label)
-        status_label = styled_label("等待确认" if requires_confirmation else "准备执行", "chatMeta")
+        status_label = styled_label("等待你的授权" if requires_confirmation else "准备执行", "chatMeta")
         card_layout.addWidget(status_label)
 
         if requires_confirmation:
             buttons = QHBoxLayout()
             buttons.setContentsMargins(0, 0, 0, 0)
             buttons.setSpacing(8)
-            run_button = QPushButton("执行")
+            run_button = QPushButton("授权执行")
             cancel_button = QPushButton("取消")
             mark_button(run_button, "primaryButton")
             mark_button(cancel_button, "secondaryButton")
@@ -1328,11 +1330,11 @@ class ChatDialog(QDialog):
         self.scroll_to_bottom()
 
     def approve_control_plan(self, plan_id: str) -> None:
-        self.set_control_plan_status(plan_id, "执行中", enabled=False)
+        self.set_control_plan_status(plan_id, "已授权，执行中", enabled=False)
         self.control_plan_approved.emit(plan_id)
 
     def cancel_control_plan(self, plan_id: str) -> None:
-        self.set_control_plan_status(plan_id, "已取消", enabled=False)
+        self.set_control_plan_status(plan_id, "已取消，未执行", enabled=False)
         self.control_plan_cancelled.emit(plan_id)
 
     def set_control_plan_status(self, plan_id: str, status: str, *, enabled: bool) -> None:
