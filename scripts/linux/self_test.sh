@@ -96,7 +96,7 @@ from desktop_mentor_app import config_store
 from desktop_mentor_app.assets import DEFAULT_IMAGE, DEFAULT_STICKERS_DIR, ROOT
 from desktop_mentor_app.config_store import AgentConfig, new_default_config
 from desktop_mentor_app.conversation_store import append_chat_turn, build_conversation_memory_context, clear_chat_history, load_chat_history, list_conversation_sessions
-from desktop_mentor_app.constants import DEFAULT_CLICK_MESSAGE, STICKER_ACTION_IDLE, STICKER_ACTION_TAP
+from desktop_mentor_app.constants import DEFAULT_CLICK_MESSAGE, MAX_PET_SIZE, MIN_PET_SIZE, STICKER_ACTION_IDLE, STICKER_ACTION_TAP
 from desktop_mentor_app.drop_context import DROP_CONTEXT_PROMPT_HEADER, collect_drop_context, compose_prompt_with_drop_context
 from desktop_mentor_app.stickers import discover_sticker_sets
 from desktop_mentor_app.todo_store import load_todos, save_todos
@@ -121,6 +121,11 @@ history_chat = ChatDialog(history=history)
 todos = TodoDialog([])
 menu = prepare_modern_menu(QMenu())
 pet = DesktopMentorPet(DEFAULT_IMAGE, DEFAULT_CLICK_MESSAGE, 120)
+pet.set_pet_size(44)
+assert pet.pet_size == MIN_PET_SIZE, pet.pet_size
+pet.set_pet_size(999)
+assert pet.pet_size == MAX_PET_SIZE, pet.pet_size
+pet.set_pet_size(120)
 pet.config.sticker_sets = discover_sticker_sets(DEFAULT_STICKERS_DIR)
 assert pet.reload_sticker_sets() == []
 bundled_source = pet.current_sticker_source_rect()
@@ -221,6 +226,11 @@ with tempfile.TemporaryDirectory() as tmp:
     custom_dir.mkdir(parents=True)
     (custom_dir / "config.json").write_text("{}", encoding="utf-8")
     assert config_store.configured_config_dir() == custom_dir
+    custom_prompt = "我是长江，但这是用户手动保存的风格提示词，不应被自动重置。"
+    custom_prompt_path = Path(tmp) / "custom-prompt" / "config.json"
+    custom_prompt_path.parent.mkdir(parents=True)
+    custom_prompt_path.write_text('{"system_prompt": ' + __import__("json").dumps(custom_prompt, ensure_ascii=False) + "}", encoding="utf-8")
+    assert config_store.load_config(custom_prompt_path).system_prompt == custom_prompt
 for key, value in saved_env.items():
     if value is None:
         os.environ.pop(key, None)

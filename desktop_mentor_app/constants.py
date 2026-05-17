@@ -6,7 +6,7 @@ APP_ID = "my-desktop-mentor"
 DEFAULT_MODEL = "gpt-4o-mini"
 CONFIG_POINTER_NAME = "config-dir.txt"
 DEFAULT_PET_SIZE = 220
-MIN_PET_SIZE = 120
+MIN_PET_SIZE = 72
 MAX_PET_SIZE = 560
 
 DEFAULT_CLICK_MESSAGE = "我在。把目标和卡点说清楚，我们先找下一步。"

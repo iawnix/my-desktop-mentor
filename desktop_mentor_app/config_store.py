@@ -246,8 +246,6 @@ def load_config(path: Path | None = None) -> AgentConfig:
     if config.idle_mode not in valid_idle_modes:
         config.idle_mode = DEFAULT_IDLE_MODE
     config.system_prompt = str(config.system_prompt or DEFAULT_PERSONALITY_PROMPT)
-    if any(marker in config.system_prompt for marker in ("我是长江", "科研老板式", "发 Nature", "这种小事")):
-        config.system_prompt = DEFAULT_PERSONALITY_PROMPT
     return config
 
 
