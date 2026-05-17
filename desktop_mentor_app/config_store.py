@@ -23,10 +23,8 @@ from .constants import (
     DEFAULT_PERSONALITY_PROMPT,
     DEFAULT_TODO_REPEAT_SECONDS,
     IDLE_MODE_OPTIONS,
-    LEGACY_CLICK_MESSAGES,
-    LEGACY_DROP_MESSAGES,
-    LEGACY_IDLE_MESSAGES,
     MAX_MEMORY_TURNS,
+    MAX_IDLE_SECONDS,
     MAX_MESSAGE_SECONDS,
     MAX_TODO_REPEAT_SECONDS,
     MIN_IDLE_SECONDS,
@@ -210,14 +208,8 @@ def load_config(path: Path | None = None) -> AgentConfig:
     config.sticker_sets = effective_sticker_sets(config.sticker_sets)
     config.config_dir = str(target.parent.expanduser())
     config.click_message = str(config.click_message or DEFAULT_CLICK_MESSAGE)
-    if config.click_message in LEGACY_CLICK_MESSAGES:
-        config.click_message = DEFAULT_CLICK_MESSAGE
     config.idle_message = str(config.idle_message or DEFAULT_IDLE_MESSAGE)
-    if config.idle_message in LEGACY_IDLE_MESSAGES:
-        config.idle_message = DEFAULT_IDLE_MESSAGE
     config.drop_message = str(config.drop_message or DEFAULT_DROP_MESSAGE)
-    if config.drop_message in LEGACY_DROP_MESSAGES:
-        config.drop_message = DEFAULT_DROP_MESSAGE
     try:
         config.message_seconds = max(
             MIN_MESSAGE_SECONDS,
@@ -233,10 +225,13 @@ def load_config(path: Path | None = None) -> AgentConfig:
     except Exception:
         config.todo_repeat_seconds = DEFAULT_TODO_REPEAT_SECONDS
     try:
-        config.idle_seconds = max(MIN_IDLE_SECONDS, int(config.idle_seconds))
+        config.idle_seconds = max(MIN_IDLE_SECONDS, min(MAX_IDLE_SECONDS, int(config.idle_seconds)))
     except Exception:
         config.idle_seconds = DEFAULT_IDLE_SECONDS
-    config.memory_enabled = bool(config.memory_enabled)
+    if isinstance(config.memory_enabled, str):
+        config.memory_enabled = config.memory_enabled.strip().lower() in {"1", "true", "yes", "on"}
+    else:
+        config.memory_enabled = bool(config.memory_enabled)
     try:
         config.memory_turns = max(1, min(MAX_MEMORY_TURNS, int(config.memory_turns)))
     except Exception:

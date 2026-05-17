@@ -11,7 +11,7 @@ from .constants import (
     DEFAULT_IDLE_MESSAGE,
     DEFAULT_MODEL,
     DEFAULT_PERSONALITY_PROMPT,
-    MAX_BUBBLE_TEXT_CHARS,
+    MAX_AGENT_REPLY_CHARS,
 )
 
 
@@ -124,4 +124,4 @@ def call_agent(config: AgentConfig, user_text: str) -> str:
         content = data["choices"][0]["message"]["content"]
     except Exception:
         content = data.get("response") or data.get("text") or data.get("message") or ""
-    return compact_text(str(content or local_agent_reply(user_text)), MAX_BUBBLE_TEXT_CHARS)
+    return compact_text(str(content or local_agent_reply(user_text)), MAX_AGENT_REPLY_CHARS)

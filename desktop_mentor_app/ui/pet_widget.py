@@ -25,6 +25,33 @@ from ..conversation_store import (
     set_active_session,
 )
 from ..constants import (
+    DEFAULT_CLICK_MESSAGE,
+    DEFAULT_DROP_MESSAGE,
+    DEFAULT_IDLE_MESSAGE,
+    DEFAULT_IDLE_SECONDS,
+    DEFAULT_MESSAGE_SECONDS,
+    MAX_PET_SIZE,
+    DEFAULT_TODO_REPEAT_SECONDS,
+    IDLE_CHECK_INTERVAL_MS,
+    IDLE_MODE_FULLSCREEN,
+    MAX_MESSAGE_SECONDS,
+    MAX_TODO_REPEAT_SECONDS,
+    MIN_IDLE_SECONDS,
+    MIN_MESSAGE_SECONDS,
+    MIN_PET_SIZE,
+    MIN_TODO_REPEAT_SECONDS,
+    STICKER_ACTION_ALERT,
+    STICKER_ACTION_DRAG,
+    STICKER_ACTION_DROP_FILE,
+    STICKER_ACTION_ERROR,
+    STICKER_ACTION_IDLE,
+    STICKER_ACTION_SPEAKING,
+    STICKER_ACTION_TAP,
+    STICKER_ACTION_THINKING,
+    STICKER_ACTIONS,
+    TODO_CHECK_INTERVAL_MS,
+)
+from .tokens import (
     ACTION_BUTTON_GAP,
     ACTION_BUTTON_MAX_SIZE,
     ACTION_BUTTON_MIN_SIZE,
@@ -42,38 +69,13 @@ from ..constants import (
     BUBBLE_TOP,
     CHAT_BUTTON_MAX_SIZE,
     CHAT_BUTTON_MIN_SIZE,
-    DEFAULT_CLICK_MESSAGE,
-    DEFAULT_DROP_MESSAGE,
-    DEFAULT_IDLE_MESSAGE,
-    DEFAULT_IDLE_SECONDS,
-    DEFAULT_MESSAGE_SECONDS,
-    MAX_PET_SIZE,
-    DEFAULT_TODO_REPEAT_SECONDS,
     DRAG_RELEASE_EFFECT_DURATION,
     DROP_EFFECT_DURATION,
     DROP_HOTZONE_PAD,
     FULLSCREEN_ALERT_DURATION_MS,
-    IDLE_CHECK_INTERVAL_MS,
-    IDLE_MODE_FULLSCREEN,
     MAX_BUBBLE_TEXT_CHARS,
-    MAX_MESSAGE_SECONDS,
-    MAX_TODO_REPEAT_SECONDS,
-    MIN_IDLE_SECONDS,
-    MIN_MESSAGE_SECONDS,
-    MIN_PET_SIZE,
-    MIN_TODO_REPEAT_SECONDS,
-    STICKER_ACTION_ALERT,
     STICKER_ALPHA_THRESHOLD,
-    STICKER_ACTION_DRAG,
-    STICKER_ACTION_DROP_FILE,
-    STICKER_ACTION_ERROR,
-    STICKER_ACTION_IDLE,
-    STICKER_ACTION_SPEAKING,
-    STICKER_ACTION_TAP,
-    STICKER_ACTION_THINKING,
-    STICKER_ACTIONS,
     STICKER_FRAME_INTERVAL_MS,
-    TODO_CHECK_INTERVAL_MS,
     TODO_BUBBLE_GAP,
     TODO_BUBBLE_MAX_HEIGHT,
     TODO_BUBBLE_MAX_VISIBLE,
@@ -505,25 +507,25 @@ class DesktopMentorPet(QWidget):
         self.show_bubble(text, duration=self.message_duration(), action=STICKER_ACTION_SPEAKING)
         if self.chat_dialog is not None:
             self.refresh_chat_dialog_sessions()
+            if self.chat_dialog.waiting_for_reply:
+                self.chat_dialog.set_waiting(False)
         if (
             self.chat_dialog is not None
-            and self.chat_dialog.waiting_for_reply
             and (not session_id or self.chat_dialog.active_session_id == session_id)
         ):
             self.chat_dialog.add_assistant_message(text)
-            self.chat_dialog.set_waiting(False)
 
     def show_agent_error(self, text: str, session_id: str = "") -> None:
         self.show_bubble(text, duration=self.message_duration(), action=STICKER_ACTION_ERROR)
         if self.chat_dialog is not None:
             self.refresh_chat_dialog_sessions()
+            if self.chat_dialog.waiting_for_reply:
+                self.chat_dialog.set_waiting(False)
         if (
             self.chat_dialog is not None
-            and self.chat_dialog.waiting_for_reply
             and (not session_id or self.chat_dialog.active_session_id == session_id)
         ):
             self.chat_dialog.add_assistant_message(text)
-            self.chat_dialog.set_waiting(False)
 
     def mark_interaction(self) -> None:
         self.last_interaction = time.monotonic()

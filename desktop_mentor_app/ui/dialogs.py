@@ -46,8 +46,8 @@ from ..constants import (
     DEFAULT_MESSAGE_SECONDS,
     DEFAULT_MEMORY_TURNS,
     DEFAULT_TODO_REPEAT_SECONDS,
-    FULLSCREEN_ALERT_DURATION_MS,
     IDLE_MODE_OPTIONS,
+    MAX_IDLE_SECONDS,
     MAX_STICKER_FRAMES,
     MAX_MEMORY_TURNS,
     MAX_MESSAGE_SECONDS,
@@ -61,6 +61,7 @@ from ..constants import (
 )
 from ..stickers import discover_sticker_sets, normalize_sticker_sets
 from ..todo_store import format_due_time, load_todos_from_items
+from .tokens import FULLSCREEN_ALERT_DURATION_MS
 
 
 APP_STYLESHEET = """
@@ -74,6 +75,18 @@ QDialog {
 }
 QWidget#dialogSurface {
     background: transparent;
+}
+QWidget#transparentSurface, QFrame#transparentSurface, QWidget#transparentViewport {
+    background: transparent;
+    border: 0;
+}
+QScrollArea#transparentScrollArea {
+    background: transparent;
+    border: 0;
+}
+QScrollArea#transparentScrollArea > QWidget, QScrollArea#transparentScrollArea QWidget#transparentViewport {
+    background: transparent;
+    border: 0;
 }
 QFrame#dialogShell {
     background: #101827;
@@ -431,6 +444,30 @@ def restyle(widget: QWidget) -> None:
     widget.update()
 
 
+def make_transparent(widget: QWidget) -> QWidget:
+    widget.setObjectName("transparentSurface")
+    widget.setAutoFillBackground(False)
+    widget.setAttribute(Qt.WidgetAttribute.WA_StyledBackground, True)
+    return widget
+
+
+def transparent_frame() -> QFrame:
+    return make_transparent(QFrame())  # type: ignore[return-value]
+
+
+def transparent_scroll_area() -> QScrollArea:
+    scroll = QScrollArea()
+    scroll.setObjectName("transparentScrollArea")
+    scroll.setAutoFillBackground(False)
+    scroll.setAttribute(Qt.WidgetAttribute.WA_StyledBackground, True)
+    scroll.viewport().setObjectName("transparentViewport")
+    scroll.viewport().setAutoFillBackground(False)
+    scroll.viewport().setAttribute(Qt.WidgetAttribute.WA_StyledBackground, True)
+    scroll.setFrameShape(QFrame.Shape.NoFrame)
+    scroll.setHorizontalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAlwaysOff)
+    return scroll
+
+
 def style_dialog_buttons(buttons: QDialogButtonBox, primary: QDialogButtonBox.StandardButton | None = None) -> None:
     for button in buttons.buttons():
         mark_button(button, "secondaryButton")
@@ -516,6 +553,7 @@ def modern_form_layout() -> QFormLayout:
 class StickerSetEditor(QWidget):
     def __init__(self, sticker_sets: dict[str, list[str]], parent: QWidget | None = None) -> None:
         super().__init__(parent)
+        make_transparent(self)
         self.edits: dict[str, QTextEdit] = {}
         self.count_labels: dict[str, QLabel] = {}
         normalized = normalize_sticker_sets(sticker_sets)
@@ -681,9 +719,9 @@ class SettingsDialog(QDialog):
         self.todo_repeat_spin.setSuffix(" s")
 
         self.idle_spin = QSpinBox()
-        self.idle_spin.setRange(MIN_IDLE_SECONDS, 86400)
+        self.idle_spin.setRange(MIN_IDLE_SECONDS, MAX_IDLE_SECONDS)
         self.idle_spin.setSingleStep(10)
-        self.idle_spin.setValue(max(MIN_IDLE_SECONDS, int(config.idle_seconds or DEFAULT_IDLE_SECONDS)))
+        self.idle_spin.setValue(max(MIN_IDLE_SECONDS, min(MAX_IDLE_SECONDS, int(config.idle_seconds or DEFAULT_IDLE_SECONDS))))
         self.idle_spin.setSuffix(" s")
 
         self.idle_mode_combo = QComboBox()
@@ -786,7 +824,7 @@ class SettingsDialog(QDialog):
 
         subtitle = styled_label("接口、形象、提醒、记忆与话术集中配置。", "dialogSubtitle", True)
 
-        content = QWidget()
+        content = make_transparent(QWidget())
         self.settings_content = content
         content_layout = QVBoxLayout(content)
         content_layout.setContentsMargins(2, 2, 12, 2)
@@ -796,11 +834,9 @@ class SettingsDialog(QDialog):
             content_layout.addWidget(card)
         content_layout.addStretch(1)
 
-        scroll = QScrollArea()
+        scroll = transparent_scroll_area()
         self.settings_scroll = scroll
         scroll.setWidgetResizable(True)
-        scroll.setFrameShape(QFrame.Shape.NoFrame)
-        scroll.setHorizontalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAlwaysOff)
         scroll.setWidget(content)
         scroll.verticalScrollBar().valueChanged.connect(self.sync_nav_to_scroll)
 
@@ -947,16 +983,14 @@ class ChatDialog(QDialog):
         mark_button(clear_button, "quietButton")
         clear_button.clicked.connect(self.request_clear_history)
 
-        self.history_content = QWidget()
+        self.history_content = make_transparent(QWidget())
         self.history_layout = QVBoxLayout(self.history_content)
         self.history_layout.setContentsMargins(12, 12, 12, 12)
         self.history_layout.setSpacing(10)
         self.history_layout.setAlignment(Qt.AlignmentFlag.AlignTop)
 
-        self.history_scroll = QScrollArea()
+        self.history_scroll = transparent_scroll_area()
         self.history_scroll.setWidgetResizable(True)
-        self.history_scroll.setFrameShape(QFrame.Shape.NoFrame)
-        self.history_scroll.setHorizontalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAlwaysOff)
         self.history_scroll.setWidget(self.history_content)
 
         self.text_edit = QTextEdit()
@@ -1075,7 +1109,7 @@ class ChatDialog(QDialog):
         shell_layout.setContentsMargins(0, 0, 0, 0)
         shell_layout.setSpacing(0)
         shell_layout.addWidget(title_bar("对话", self))
-        content_wrap = QFrame()
+        content_wrap = transparent_frame()
         content_layout = QVBoxLayout(content_wrap)
         content_layout.setContentsMargins(14, 14, 14, 14)
         content_layout.addWidget(panel)
@@ -1178,7 +1212,7 @@ class ChatDialog(QDialog):
         role = "assistant" if role == "assistant" else "user"
         self.remove_empty_state()
 
-        row = QWidget()
+        row = make_transparent(QWidget())
         row_layout = QHBoxLayout(row)
         row_layout.setContentsMargins(0, 0, 0, 0)
         row_layout.setSpacing(8)
@@ -1293,7 +1327,7 @@ class TextViewDialog(QDialog):
         shell_layout.setContentsMargins(0, 0, 0, 0)
         shell_layout.setSpacing(0)
         shell_layout.addWidget(title_bar(title, self))
-        content_wrap = QFrame()
+        content_wrap = transparent_frame()
         content_layout = QVBoxLayout(content_wrap)
         content_layout.setContentsMargins(14, 14, 14, 14)
         content_layout.addWidget(panel)
@@ -1386,7 +1420,7 @@ class TodoDialog(QDialog):
         shell_layout.setContentsMargins(0, 0, 0, 0)
         shell_layout.setSpacing(0)
         shell_layout.addWidget(title_bar("待办", self))
-        content_wrap = QFrame()
+        content_wrap = transparent_frame()
         content_layout = QVBoxLayout(content_wrap)
         content_layout.setContentsMargins(14, 14, 14, 14)
         content_layout.addWidget(panel)

@@ -57,6 +57,7 @@ step "Python syntax"
   desktop_mentor_app/agent_client.py \
   desktop_mentor_app/idle_detector.py \
   desktop_mentor_app/drop_context.py \
+  desktop_mentor_app/ui/tokens.py \
   desktop_mentor_app/ui/dialogs.py \
   desktop_mentor_app/ui/pet_widget.py \
   packaging/windows/desktop_mentor.spec
@@ -95,8 +96,8 @@ from PySide6.QtWidgets import QApplication, QFrame, QMenu, QPushButton, QScrollA
 from desktop_mentor_app import config_store
 from desktop_mentor_app.assets import DEFAULT_IMAGE, DEFAULT_STICKERS_DIR, ROOT
 from desktop_mentor_app.config_store import AgentConfig, new_default_config
-from desktop_mentor_app.conversation_store import append_chat_turn, build_conversation_memory_context, clear_chat_history, load_chat_history, list_conversation_sessions
-from desktop_mentor_app.constants import DEFAULT_CLICK_MESSAGE, MAX_PET_SIZE, MIN_PET_SIZE, STICKER_ACTION_IDLE, STICKER_ACTION_TAP
+from desktop_mentor_app.conversation_store import append_chat_turn, build_conversation_memory_context, clear_chat_history, create_conversation_session, load_chat_history, list_conversation_sessions
+from desktop_mentor_app.constants import DEFAULT_CLICK_MESSAGE, MAX_IDLE_SECONDS, MAX_PET_SIZE, MIN_PET_SIZE, STICKER_ACTION_IDLE, STICKER_ACTION_TAP
 from desktop_mentor_app.drop_context import DROP_CONTEXT_PROMPT_HEADER, collect_drop_context, compose_prompt_with_drop_context
 from desktop_mentor_app.stickers import discover_sticker_sets
 from desktop_mentor_app.todo_store import load_todos, save_todos
@@ -164,6 +165,10 @@ assert scroll_count == 1, scroll_count
 assert section_count >= 6, section_count
 assert len(nav_buttons) == 6, len(nav_buttons)
 assert settings.windowFlags() & Qt.WindowType.FramelessWindowHint
+assert settings.settings_scroll.objectName() == "transparentScrollArea"
+assert settings.settings_scroll.viewport().objectName() == "transparentViewport"
+assert chat.history_scroll.objectName() == "transparentScrollArea"
+assert chat.history_scroll.viewport().objectName() == "transparentViewport"
 assert menu.testAttribute(Qt.WidgetAttribute.WA_TranslucentBackground)
 settings.scroll_to_section(2)
 assert any(button.text() == "互动" and button.objectName() == "railNavButtonActive" for button in nav_buttons)
@@ -177,6 +182,12 @@ assert chat.waiting_for_reply
 chat.add_assistant_message("新的回答")
 chat.set_waiting(False)
 assert not chat.waiting_for_reply
+switched_session = create_conversation_session("切换后的会话")
+pet.chat_dialog = ChatDialog(sessions=list_conversation_sessions(), active_session=managed_session, history=[])
+pet.chat_dialog.set_waiting(True)
+pet.show_agent_reply("切换前请求的异步返回", switched_session.session_id)
+assert not pet.chat_dialog.waiting_for_reply
+pet.chat_dialog = None
 assert len(history) == 2, history
 assert len(history_chat.message_widgets) == 2, len(history_chat.message_widgets)
 
@@ -231,6 +242,22 @@ with tempfile.TemporaryDirectory() as tmp:
     custom_prompt_path.parent.mkdir(parents=True)
     custom_prompt_path.write_text('{"system_prompt": ' + __import__("json").dumps(custom_prompt, ensure_ascii=False) + "}", encoding="utf-8")
     assert config_store.load_config(custom_prompt_path).system_prompt == custom_prompt
+    custom_messages = {
+        "click_message": "抓紧, 谢谢!",
+        "idle_message": "课题如何了? 抓紧谢谢!",
+        "drop_message": "这种垃圾就不要让我看, 我每天很忙的!",
+        "idle_seconds": 999999,
+        "memory_enabled": "false",
+    }
+    custom_messages_path = Path(tmp) / "custom-messages" / "config.json"
+    custom_messages_path.parent.mkdir(parents=True)
+    custom_messages_path.write_text(__import__("json").dumps(custom_messages, ensure_ascii=False), encoding="utf-8")
+    loaded_messages = config_store.load_config(custom_messages_path)
+    assert loaded_messages.click_message == custom_messages["click_message"]
+    assert loaded_messages.idle_message == custom_messages["idle_message"]
+    assert loaded_messages.drop_message == custom_messages["drop_message"]
+    assert loaded_messages.idle_seconds == MAX_IDLE_SECONDS
+    assert loaded_messages.memory_enabled is False
 for key, value in saved_env.items():
     if value is None:
         os.environ.pop(key, None)
