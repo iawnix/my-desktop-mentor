@@ -60,6 +60,8 @@ cd my-desktop-mentor
 python3 desktop_mentor.py
 ```
 
+默认桌宠显示尺寸是 `220 px`。如果临时想更大，可以用 `--size 280`，或在桌宠右键菜单里选择 `放大` / `缩小`。
+
 如果系统 Python 的 PySide6 不完整，可以指定解释器：
 
 ```bash

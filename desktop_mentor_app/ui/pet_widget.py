@@ -47,6 +47,7 @@ from ..constants import (
     DEFAULT_IDLE_MESSAGE,
     DEFAULT_IDLE_SECONDS,
     DEFAULT_MESSAGE_SECONDS,
+    MAX_PET_SIZE,
     DEFAULT_TODO_REPEAT_SECONDS,
     DRAG_RELEASE_EFFECT_DURATION,
     DROP_EFFECT_DURATION,
@@ -59,6 +60,7 @@ from ..constants import (
     MAX_TODO_REPEAT_SECONDS,
     MIN_IDLE_SECONDS,
     MIN_MESSAGE_SECONDS,
+    MIN_PET_SIZE,
     MIN_TODO_REPEAT_SECONDS,
     STICKER_ACTION_ALERT,
     STICKER_ACTION_DRAG,
@@ -164,7 +166,7 @@ class DesktopMentorPet(QWidget):
         )
         self.default_message = message
         self.current_message = message
-        self.pet_size = max(96, min(420, size))
+        self.pet_size = max(MIN_PET_SIZE, min(MAX_PET_SIZE, size))
         self.bubble_width = BUBBLE_MIN_WIDTH
         self.bubble_body_height = BUBBLE_BODY_MIN_HEIGHT
         self.bubble_height = BUBBLE_MIN_HEIGHT
@@ -1328,7 +1330,7 @@ class DesktopMentorPet(QWidget):
 
     def set_pet_size(self, size: int) -> None:
         old_center = self.sticker_center_global()
-        self.pet_size = max(96, min(420, size))
+        self.pet_size = max(MIN_PET_SIZE, min(MAX_PET_SIZE, size))
         self.resize(*self.window_dimensions())
         self.move(old_center - self.sticker_rect().center().toPoint())
         self.update()

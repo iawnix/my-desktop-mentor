@@ -5,6 +5,9 @@ APP_NAME = "我的桌面导师"
 APP_ID = "my-desktop-mentor"
 DEFAULT_MODEL = "gpt-4o-mini"
 CONFIG_POINTER_NAME = "config-dir.txt"
+DEFAULT_PET_SIZE = 220
+MIN_PET_SIZE = 120
+MAX_PET_SIZE = 560
 
 DEFAULT_CLICK_MESSAGE = "我在。把目标和卡点说清楚，我们先找下一步。"
 DEFAULT_IDLE_MESSAGE = "进展怎么样？需要我帮你梳理一下下一步吗？"
