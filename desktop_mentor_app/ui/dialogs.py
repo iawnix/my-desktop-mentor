@@ -36,6 +36,8 @@ from ..config_store import AgentConfig, config_path
 from ..conversation_store import ChatHistoryMessage, ConversationSession, format_session_time
 from ..constants import (
     APP_NAME,
+    DEFAULT_CONTROL_ENABLED,
+    DEFAULT_CONTROL_WORKSPACE,
     DEFAULT_IDLE_MODE,
     DEFAULT_IDLE_SECONDS,
     DEFAULT_MODEL,
@@ -148,6 +150,11 @@ QFrame#memoryStrip {
     background: #101827;
     border: 1px solid #2a4161;
     border-radius: 12px;
+}
+QFrame#controlPlan {
+    background: #102033;
+    border: 1px solid #3b6a92;
+    border-radius: 14px;
 }
 QFrame#hairline {
     background: #24364f;
@@ -738,6 +745,20 @@ class SettingsDialog(QDialog):
         self.memory_turns_spin.setValue(max(1, min(MAX_MEMORY_TURNS, int(config.memory_turns or DEFAULT_MEMORY_TURNS))))
         self.memory_turns_spin.setSuffix(" turns")
 
+        self.control_check = QCheckBox("允许受控电脑操作")
+        self.control_check.setChecked(bool(config.control_enabled if config.control_enabled is not None else DEFAULT_CONTROL_ENABLED))
+
+        self.control_workspace_edit = QLineEdit(config.control_workspace or DEFAULT_CONTROL_WORKSPACE or str(Path.home()))
+        self.control_workspace_edit.setPlaceholderText("默认电脑操作工作目录")
+        control_workspace_button = QPushButton("选择")
+        mark_button(control_workspace_button, "miniButton")
+        control_workspace_button.clicked.connect(self.browse_control_workspace)
+        control_workspace_row = QHBoxLayout()
+        control_workspace_row.setContentsMargins(0, 0, 0, 0)
+        control_workspace_row.setSpacing(8)
+        control_workspace_row.addWidget(self.control_workspace_edit, 1)
+        control_workspace_row.addWidget(control_workspace_button)
+
         self.prompt_edit = QTextEdit(config.system_prompt or DEFAULT_PERSONALITY_PROMPT)
         self.prompt_edit.setMinimumHeight(190)
 
@@ -765,6 +786,10 @@ class SettingsDialog(QDialog):
         memory_form.addRow("Memory", self.memory_check)
         memory_form.addRow("Memory depth", self.memory_turns_spin)
 
+        control_form = modern_form_layout()
+        control_form.addRow("Computer control", self.control_check)
+        control_form.addRow("Workspace", control_workspace_row)
+
         sticker_layout = QVBoxLayout()
         sticker_layout.setContentsMargins(0, 0, 0, 0)
         sticker_layout.setSpacing(10)
@@ -781,6 +806,7 @@ class SettingsDialog(QDialog):
             section_card("互动", interaction_form),
             section_card("动作贴纸", sticker_layout, "这些素材只写入用户运行时配置，不复制进项目目录。"),
             section_card("记忆", memory_form),
+            section_card("电脑控制", control_form, "读操作直接执行；运行、打开和写入会先请求确认。"),
             section_card("风格提示词", prompt_layout),
         ]
         self.nav_buttons: list[QPushButton] = []
@@ -812,7 +838,7 @@ class SettingsDialog(QDialog):
         rail_layout.setSpacing(10)
         rail_layout.addWidget(styled_label(APP_NAME, "railTitle", True))
         rail_layout.addSpacing(6)
-        for index, item_text in enumerate(("接口", "运行", "互动", "贴纸", "记忆", "风格")):
+        for index, item_text in enumerate(("接口", "运行", "互动", "贴纸", "记忆", "电脑", "风格")):
             nav = QPushButton(item_text)
             nav.setObjectName("railNavButtonActive" if index == 0 else "railNavButton")
             nav.setCursor(Qt.CursorShape.PointingHandCursor)
@@ -907,6 +933,12 @@ class SettingsDialog(QDialog):
         if path:
             self.config_dir_edit.setText(path)
 
+    def browse_control_workspace(self) -> None:
+        current = self.control_workspace_edit.text().strip() or str(Path.home())
+        path = QFileDialog.getExistingDirectory(self, "选择电脑操作工作目录", str(Path(current).expanduser()))
+        if path:
+            self.control_workspace_edit.setText(path)
+
     def image_path_value(self) -> str:
         raw_path = self.image_edit.text().strip()
         if not raw_path:
@@ -934,6 +966,8 @@ class SettingsDialog(QDialog):
             idle_mode=str(self.idle_mode_combo.currentData() or DEFAULT_IDLE_MODE),
             memory_enabled=self.memory_check.isChecked(),
             memory_turns=int(self.memory_turns_spin.value()),
+            control_enabled=self.control_check.isChecked(),
+            control_workspace=self.control_workspace_edit.text().strip(),
             sticker_sets=self.sticker_editor.to_sticker_sets(),
             system_prompt=self.prompt_edit.toPlainText().strip() or DEFAULT_PERSONALITY_PROMPT,
         )
@@ -941,6 +975,8 @@ class SettingsDialog(QDialog):
 
 class ChatDialog(QDialog):
     message_submitted = Signal(str, bool, str)
+    control_plan_approved = Signal(str)
+    control_plan_cancelled = Signal(str)
     session_selected = Signal(str)
     new_session_requested = Signal()
     history_clear_requested = Signal(str)
@@ -964,6 +1000,7 @@ class ChatDialog(QDialog):
         self.waiting_for_reply = False
         self.active_session_id = active_session.session_id if active_session is not None else ""
         self.message_widgets: list[QWidget] = []
+        self.control_plan_buttons: dict[str, tuple[QPushButton, QPushButton, QLabel]] = {}
 
         self.status_label = styled_label("就绪", "mutedLabel")
         self.session_title_label = styled_label("新会话", "dialogTitle")
@@ -1247,6 +1284,65 @@ class ChatDialog(QDialog):
 
     def add_assistant_message(self, content: str) -> None:
         self.add_message("assistant", content, int(time.time()))
+
+    def add_control_plan(self, plan_id: str, title: str, details: str, requires_confirmation: bool) -> None:
+        self.remove_empty_state()
+        row = make_transparent(QWidget())
+        row_layout = QHBoxLayout(row)
+        row_layout.setContentsMargins(0, 0, 0, 0)
+        row_layout.setSpacing(8)
+
+        card = QFrame()
+        card.setObjectName("controlPlan")
+        card.setMaximumWidth(560)
+        card_layout = QVBoxLayout(card)
+        card_layout.setContentsMargins(12, 10, 12, 10)
+        card_layout.setSpacing(8)
+        card_layout.addWidget(styled_label(title, "chatRole"))
+        detail_label = styled_label(details, "chatText", True)
+        detail_label.setTextInteractionFlags(Qt.TextInteractionFlag.TextSelectableByMouse)
+        card_layout.addWidget(detail_label)
+        status_label = styled_label("等待确认" if requires_confirmation else "准备执行", "chatMeta")
+        card_layout.addWidget(status_label)
+
+        if requires_confirmation:
+            buttons = QHBoxLayout()
+            buttons.setContentsMargins(0, 0, 0, 0)
+            buttons.setSpacing(8)
+            run_button = QPushButton("执行")
+            cancel_button = QPushButton("取消")
+            mark_button(run_button, "primaryButton")
+            mark_button(cancel_button, "secondaryButton")
+            run_button.clicked.connect(lambda _checked=False, target=plan_id: self.approve_control_plan(target))
+            cancel_button.clicked.connect(lambda _checked=False, target=plan_id: self.cancel_control_plan(target))
+            buttons.addStretch(1)
+            buttons.addWidget(cancel_button)
+            buttons.addWidget(run_button)
+            card_layout.addLayout(buttons)
+            self.control_plan_buttons[plan_id] = (run_button, cancel_button, status_label)
+
+        row_layout.addWidget(card, 0)
+        row_layout.addStretch(1)
+        self.history_layout.addWidget(row)
+        self.message_widgets.append(row)
+        self.scroll_to_bottom()
+
+    def approve_control_plan(self, plan_id: str) -> None:
+        self.set_control_plan_status(plan_id, "执行中", enabled=False)
+        self.control_plan_approved.emit(plan_id)
+
+    def cancel_control_plan(self, plan_id: str) -> None:
+        self.set_control_plan_status(plan_id, "已取消", enabled=False)
+        self.control_plan_cancelled.emit(plan_id)
+
+    def set_control_plan_status(self, plan_id: str, status: str, *, enabled: bool) -> None:
+        buttons = self.control_plan_buttons.get(plan_id)
+        if buttons is None:
+            return
+        run_button, cancel_button, status_label = buttons
+        run_button.setEnabled(enabled)
+        cancel_button.setEnabled(enabled)
+        status_label.setText(status)
 
     @staticmethod
     def format_message_time(ts: int | None) -> str:

@@ -1,6 +1,6 @@
 # 我的桌面导师
 
-一个可配置的桌面导师 / 桌宠应用。主程序是 PySide6 写的透明置顶贴纸窗口，支持鼠标和触屏拖动、动作贴纸动画、贴纸旁按钮对话/设置/退出、右键待办提醒、空闲提醒、文件/文件夹拖放、OpenAI-compatible agent 接口、可选本地对话记忆，以及 Windows 打包。
+一个可配置的桌面导师 / 桌宠应用。主程序是 PySide6 写的透明置顶贴纸窗口，支持鼠标和触屏拖动、动作贴纸动画、贴纸旁按钮对话/设置/退出、右键待办提醒、空闲提醒、文件/文件夹拖放、OpenAI-compatible agent 接口、可选本地对话记忆、受控电脑操作，以及 Windows 打包。
 
 ## 目录
 
@@ -23,6 +23,7 @@
 - `assets/todo_badge.png`：待办窗口图标。
 - `assets/stickers/`：默认动作贴纸素材，包含 `idle`、`tap`、`drag`、`thinking`、`speaking`、`alert`、`drop_file`、`error` 八类动作，每类 8 帧。
 - `desktop_mentor_app/config_store.py`：运行时配置、配置目录切换、配置迁移和记忆/待办路径。
+- `desktop_mentor_app/control/`：受控电脑操作层，包含命令解析、权限判断、跨平台执行器和审计日志。
 - `desktop_mentor_app/assets.py`：默认资源路径、PNG 到 ICO 转换、用户图标缓存。
 - `desktop_mentor_app/conversation_store.py`：本地会话索引、每会话消息 JSONL、摘要/记忆条目和旧历史迁移。
 - `desktop_mentor_app/stickers.py`：动作贴纸集清洗、顺序保留和帧数量统计。
@@ -133,6 +134,8 @@ dist\MyDesktopMentor.exe
 - `Idle mode`
 - `Memory`
 - `Memory depth`
+- `Computer control`
+- `Workspace`
 - `Style prompt`
 
 贴纸右侧有三个圆形按钮，从上到下是：对话、设置、退出。对话窗口会贴近桌宠显示，并自动避开屏幕边界。
@@ -176,7 +179,26 @@ stickers/
 
 启用 `Memory` 后，程序会把当前会话摘要、命中的记忆条目和最近若干轮消息作为上下文带给 agent；同时保留旧 `memory.jsonl` 作为兼容记忆。默认关闭，不会把历史无条件发给模型，也不会写入项目目录。
 
-`Config directory` 可以切换运行时设置目录；`config.json`、`conversations/`、`chat_history.jsonl`、`memory.jsonl`、`todos.json` 和自动生成的图标缓存都会跟着这个目录走。
+启用 `Computer control` 后，对话窗口支持受控电脑操作命令。读操作会直接执行；运行命令、打开路径/链接、创建或写入文件会先在会话里显示操作计划，用户点击 `执行` 后才动手，点击 `取消` 则不会执行。
+
+支持的第一阶段/第二阶段命令：
+
+```text
+/sys 或 /pwd
+/ls [路径]
+/read <路径>
+/search <关键词> [路径]
+/open <路径或URL>
+/run [--cwd 路径] <命令 参数...>
+/mkdir <路径>
+/touch <路径>
+/write <路径> :: <内容>
+/append <路径> :: <内容>
+```
+
+`Workspace` 是相对路径和命令运行的默认工作目录。第一版不会执行删除类命令，不通过 shell 字符串执行任意命令，也会阻止读取或写入看起来包含 token、secret、password、credential、SSH 私钥等敏感名称的路径。电脑操作审计日志写入运行时配置目录的 `control/audit.jsonl`。
+
+`Config directory` 可以切换运行时设置目录；`config.json`、`conversations/`、`control/audit.jsonl`、`chat_history.jsonl`、`memory.jsonl`、`todos.json` 和自动生成的图标缓存都会跟着这个目录走。
 
 右键菜单里的 `待办` 可以添加定时提醒。时间输入框固定为 `年-月-日 时:分:秒` 格式，可直接输入数字。待办到期后会在桌面上生成持久提醒泡泡；泡泡默认不自动消失，点击任意一个同待办泡泡后才确认并删除该待办。若一直不点击，程序会按 `Todo repeat` 间隔移除旧到期事件并追加下一次待办提醒，桌面上会保留累计提醒泡泡。待办泡泡存在时会压制 idle 提醒，避免两套机制同时弹出。
 
@@ -215,6 +237,7 @@ DESKTOP_MENTOR_CONFIG=/path/to/config.json ./scripts/linux/run_desktop_mentor.sh
 - `python3 -m py_compile packaging/windows/desktop_mentor.spec`
 - `./scripts/linux/self_test.sh`
 - offscreen 设置/内置动作贴纸/会话管理/记忆上下文/运行时 smoke test
+- 受控电脑操作命令解析、只读执行、确认型写入/运行命令、阻止删除命令回归测试
 - 最终文件列表只包含源码、必要素材、运行/打包脚本、依赖文件和文档。
 
 ## 边界
@@ -222,5 +245,7 @@ DESKTOP_MENTOR_CONFIG=/path/to/config.json ./scripts/linux/run_desktop_mentor.sh
 - API key 只写入用户本机运行时配置，不写入项目目录。
 - 会话索引、会话历史、对话记忆和待办只写入用户配置目录，不写入项目目录。
 - 待办只写入用户配置目录的 `todos.json`，不写入项目目录。
+- 电脑操作审计日志只写入用户配置目录的 `control/audit.jsonl`，不写入项目目录。
+- 第一版电脑操作不支持删除文件、force 操作、shell 字符串执行或无确认写入；运行、打开和写入都需要用户在对话窗口确认。
 - 项目内置贴纸素材保存在 `assets/stickers/`；用户后续导入的外部素材只以路径形式写入运行时配置，除非明确要求打包进项目。
 - `work/` 仍是本地任务目录，不同步进 Codex 主仓库。

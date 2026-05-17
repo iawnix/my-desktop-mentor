@@ -12,6 +12,8 @@ from .constants import (
     APP_ID,
     CONFIG_POINTER_NAME,
     DEFAULT_CLICK_MESSAGE,
+    DEFAULT_CONTROL_ENABLED,
+    DEFAULT_CONTROL_WORKSPACE,
     DEFAULT_DROP_MESSAGE,
     DEFAULT_IDLE_MESSAGE,
     DEFAULT_IDLE_MODE,
@@ -51,6 +53,8 @@ class AgentConfig:
     idle_mode: str = DEFAULT_IDLE_MODE
     memory_enabled: bool = DEFAULT_MEMORY_ENABLED
     memory_turns: int = DEFAULT_MEMORY_TURNS
+    control_enabled: bool = DEFAULT_CONTROL_ENABLED
+    control_workspace: str = DEFAULT_CONTROL_WORKSPACE
     sticker_sets: dict[str, list[str]] = field(default_factory=dict)
     system_prompt: str = DEFAULT_PERSONALITY_PROMPT
 
@@ -232,6 +236,11 @@ def load_config(path: Path | None = None) -> AgentConfig:
         config.memory_enabled = config.memory_enabled.strip().lower() in {"1", "true", "yes", "on"}
     else:
         config.memory_enabled = bool(config.memory_enabled)
+    if isinstance(config.control_enabled, str):
+        config.control_enabled = config.control_enabled.strip().lower() in {"1", "true", "yes", "on"}
+    else:
+        config.control_enabled = bool(config.control_enabled)
+    config.control_workspace = str(config.control_workspace or "").strip()
     try:
         config.memory_turns = max(1, min(MAX_MEMORY_TURNS, int(config.memory_turns)))
     except Exception:

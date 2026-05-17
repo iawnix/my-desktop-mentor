@@ -50,6 +50,12 @@ step "Python syntax"
   desktop_mentor.py \
   desktop_mentor_app/constants.py \
   desktop_mentor_app/config_store.py \
+  desktop_mentor_app/control/__init__.py \
+  desktop_mentor_app/control/audit_log.py \
+  desktop_mentor_app/control/executor.py \
+  desktop_mentor_app/control/permissions.py \
+  desktop_mentor_app/control/tool_registry.py \
+  desktop_mentor_app/control/types.py \
   desktop_mentor_app/conversation_store.py \
   desktop_mentor_app/assets.py \
   desktop_mentor_app/stickers.py \
@@ -87,6 +93,8 @@ DESKTOP_MENTOR_CONFIG_DIR="${DESKTOP_MENTOR_CONFIG_DIR:-/tmp/my-desktop-mentor-s
 import time
 import os
 import shutil
+import shlex
+import sys
 import tempfile
 from pathlib import Path
 
@@ -96,6 +104,7 @@ from PySide6.QtWidgets import QApplication, QFrame, QMenu, QPushButton, QScrollA
 from desktop_mentor_app import config_store
 from desktop_mentor_app.assets import DEFAULT_IMAGE, DEFAULT_STICKERS_DIR, ROOT
 from desktop_mentor_app.config_store import AgentConfig, new_default_config
+from desktop_mentor_app.control import PermissionLevel, build_control_plan, execute_control_plan
 from desktop_mentor_app.conversation_store import append_chat_turn, build_conversation_memory_context, clear_chat_history, create_conversation_session, load_chat_history, list_conversation_sessions
 from desktop_mentor_app.constants import DEFAULT_CLICK_MESSAGE, MAX_IDLE_SECONDS, MAX_PET_SIZE, MIN_PET_SIZE, STICKER_ACTION_IDLE, STICKER_ACTION_TAP
 from desktop_mentor_app.drop_context import DROP_CONTEXT_PROMPT_HEADER, collect_drop_context, compose_prompt_with_drop_context
@@ -162,8 +171,8 @@ section_count = len([w for w in settings.findChildren(QFrame) if w.objectName() 
 scroll_count = len(settings.findChildren(QScrollArea))
 nav_buttons = [w for w in settings.findChildren(QPushButton) if w.objectName().startswith("railNavButton")]
 assert scroll_count == 1, scroll_count
-assert section_count >= 6, section_count
-assert len(nav_buttons) == 6, len(nav_buttons)
+assert section_count >= 7, section_count
+assert len(nav_buttons) == 7, len(nav_buttons)
 assert settings.windowFlags() & Qt.WindowType.FramelessWindowHint
 assert settings.settings_scroll.objectName() == "transparentScrollArea"
 assert settings.settings_scroll.viewport().objectName() == "transparentViewport"
@@ -173,6 +182,11 @@ assert menu.testAttribute(Qt.WidgetAttribute.WA_TranslucentBackground)
 settings.scroll_to_section(2)
 assert any(button.text() == "互动" and button.objectName() == "railNavButtonActive" for button in nav_buttons)
 assert settings.sticker_editor.to_sticker_sets() == {}
+approvals = []
+chat.control_plan_approved.connect(lambda plan_id: approvals.append(plan_id))
+chat.add_control_plan("plan-1", "测试计划", "1. 读取状态", True)
+chat.approve_control_plan("plan-1")
+assert approvals == ["plan-1"], approvals
 submissions = []
 chat.message_submitted.connect(lambda text, use_context, session_id: submissions.append((text, use_context, session_id)))
 chat.text_edit.setPlainText("新的问题")
@@ -258,6 +272,36 @@ with tempfile.TemporaryDirectory() as tmp:
     assert loaded_messages.drop_message == custom_messages["drop_message"]
     assert loaded_messages.idle_seconds == MAX_IDLE_SECONDS
     assert loaded_messages.memory_enabled is False
+    assert loaded_messages.control_enabled is True
+    control_root = Path(tmp) / "control-root"
+    control_root.mkdir()
+    (control_root / "input.txt").write_text("alpha\nbeta\n", encoding="utf-8")
+    sys_plan = build_control_plan("/sys", str(control_root))
+    assert sys_plan is not None and sys_plan.permission == PermissionLevel.READ_ONLY
+    assert execute_control_plan(sys_plan).ok
+    ls_plan = build_control_plan("/ls .", str(control_root))
+    assert ls_plan is not None and execute_control_plan(ls_plan).ok
+    read_plan = build_control_plan("/read input.txt", str(control_root))
+    assert read_plan is not None
+    read_result = execute_control_plan(read_plan)
+    assert read_result.ok and "alpha" in read_result.output
+    search_plan = build_control_plan("/search beta .", str(control_root))
+    assert search_plan is not None
+    search_result = execute_control_plan(search_plan)
+    assert search_result.ok and "input.txt" in search_result.output
+    write_plan = build_control_plan("/write output.txt :: hello", str(control_root))
+    assert write_plan is not None and write_plan.requires_confirmation
+    write_result = execute_control_plan(write_plan)
+    assert write_result.ok and (control_root / "output.txt").read_text(encoding="utf-8").strip() == "hello"
+    run_plan = build_control_plan(
+        f"/run --cwd {shlex.quote(str(control_root))} {shlex.quote(sys.executable)} -c \"print('mentor-control')\"",
+        str(control_root),
+    )
+    assert run_plan is not None and run_plan.requires_confirmation
+    run_result = execute_control_plan(run_plan)
+    assert run_result.ok and "mentor-control" in run_result.output
+    blocked_plan = build_control_plan("/run rm -rf /", str(control_root))
+    assert blocked_plan is not None and blocked_plan.is_blocked
 for key, value in saved_env.items():
     if value is None:
         os.environ.pop(key, None)

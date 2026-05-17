@@ -13,6 +13,7 @@ from PySide6.QtWidgets import QApplication, QDialog, QMenu, QWidget
 from ..agent_client import append_memory_turn, call_agent, compact_text
 from ..assets import DEFAULT_IMAGE, convert_image_to_ico, ensure_default_icon, icon_cache_path_for_image
 from ..config_store import config_path, load_config, save_config, save_config_directory
+from ..control import ControlPlan, build_control_plan, execute_control_plan
 from ..conversation_store import (
     append_chat_turn,
     build_conversation_memory_context,
@@ -208,6 +209,7 @@ class DesktopMentorPet(QWidget):
         self.last_drop_context = ""
         self.last_drop_paths: list[str] = []
         self.todo_bubbles: list[dict[str, object]] = []
+        self.pending_control_plans: dict[str, tuple[ControlPlan, str, str]] = {}
         self.todo_stack_height = 0
         self.chat_button_pressed = False
         self.settings_button_pressed = False
@@ -1274,6 +1276,8 @@ class DesktopMentorPet(QWidget):
             load_chat_history(active_session.session_id),
         )
         dialog.message_submitted.connect(self.handle_chat_message)
+        dialog.control_plan_approved.connect(self.approve_control_plan)
+        dialog.control_plan_cancelled.connect(self.cancel_control_plan)
         dialog.session_selected.connect(self.load_chat_session_in_dialog)
         dialog.new_session_requested.connect(self.create_chat_session_from_dialog)
         dialog.history_clear_requested.connect(self.clear_chat_history_from_dialog)
@@ -1322,13 +1326,18 @@ class DesktopMentorPet(QWidget):
             if self.chat_dialog is not None:
                 self.chat_dialog.set_waiting(False)
             return
+        active_session = get_session(session_id) or ensure_active_session()
+        set_active_session(active_session.session_id)
+        if self.config.control_enabled:
+            control_plan = build_control_plan(user_prompt, self.config.control_workspace)
+            if control_plan is not None:
+                self.handle_control_plan(control_plan, user_prompt, active_session.session_id)
+                return
         if self.chat_dialog is not None and self.chat_dialog.drop_context_was_removed():
             self.last_drop_paths = []
             self.last_drop_context = ""
         drop_context = self.last_drop_context if use_drop_context else ""
         prompt = compose_prompt_with_drop_context(user_prompt, drop_context)
-        active_session = get_session(session_id) or ensure_active_session()
-        set_active_session(active_session.session_id)
         self.show_bubble("导师处理中。", duration=min(1.8, self.message_duration()), action=None)
         self.play_action(STICKER_ACTION_THINKING, loop=True)
         thread = threading.Thread(
@@ -1337,6 +1346,79 @@ class DesktopMentorPet(QWidget):
             daemon=True,
         )
         thread.start()
+
+    def handle_control_plan(self, plan: ControlPlan, user_prompt: str, session_id: str) -> None:
+        if plan.is_blocked:
+            if self.chat_dialog is not None:
+                self.chat_dialog.set_waiting(True)
+            self.fetch_control_reply(plan, user_prompt, session_id)
+            return
+        if plan.requires_confirmation:
+            self.pending_control_plans[plan.plan_id] = (plan, user_prompt, session_id)
+            if self.chat_dialog is not None:
+                self.chat_dialog.add_control_plan(plan.plan_id, plan.title, plan.summary(), True)
+                self.chat_dialog.set_waiting(False)
+            try:
+                append_chat_turn(user_prompt, plan.summary() + "\n\n等待用户确认。", session_id)
+            except Exception:
+                pass
+            self.refresh_chat_dialog_sessions()
+            self.show_bubble("电脑操作需要确认。", duration=self.message_duration(), action=STICKER_ACTION_THINKING)
+            return
+        self.show_bubble("执行本地只读操作。", duration=min(1.8, self.message_duration()), action=STICKER_ACTION_THINKING)
+        self.play_action(STICKER_ACTION_THINKING, loop=True)
+        thread = threading.Thread(target=self.fetch_control_reply, args=(plan, user_prompt, session_id), daemon=True)
+        thread.start()
+
+    def approve_control_plan(self, plan_id: str) -> None:
+        pending = self.pending_control_plans.pop(plan_id, None)
+        if pending is None:
+            self.agent_signals.error_ready.emit("电脑操作计划已过期或不存在。", "")
+            return
+        plan, _user_prompt, session_id = pending
+        if self.chat_dialog is not None:
+            self.chat_dialog.set_waiting(True)
+        self.show_bubble("正在执行电脑操作。", duration=min(1.8, self.message_duration()), action=STICKER_ACTION_THINKING)
+        self.play_action(STICKER_ACTION_THINKING, loop=True)
+        thread = threading.Thread(
+            target=self.fetch_control_reply,
+            args=(plan, f"执行确认：{plan.title}", session_id),
+            daemon=True,
+        )
+        thread.start()
+
+    def cancel_control_plan(self, plan_id: str) -> None:
+        pending = self.pending_control_plans.pop(plan_id, None)
+        if pending is None:
+            return
+        plan, _user_prompt, session_id = pending
+        reply = f"已取消电脑操作：{plan.title}"
+        try:
+            append_chat_turn(f"取消电脑操作：{plan.title}", reply, session_id)
+        except Exception:
+            pass
+        self.agent_signals.reply_ready.emit(reply, session_id)
+
+    def fetch_control_reply(self, plan: ControlPlan, memory_prompt: str, session_id: str) -> None:
+        try:
+            result = execute_control_plan(plan)
+            reply = result.display_text()
+        except Exception as exc:
+            reply = f"电脑操作出错：{type(exc).__name__}: {exc}"
+            try:
+                append_chat_turn(memory_prompt, reply, session_id)
+            except Exception:
+                pass
+            self.agent_signals.error_ready.emit(reply, session_id)
+            return
+        try:
+            append_chat_turn(memory_prompt, reply, session_id)
+        except Exception:
+            pass
+        if result.ok:
+            self.agent_signals.reply_ready.emit(reply, session_id)
+        else:
+            self.agent_signals.error_ready.emit(reply, session_id)
 
     def ask_about_dropped_files(self) -> None:
         self.mark_interaction()
