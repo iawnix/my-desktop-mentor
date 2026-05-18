@@ -59,8 +59,8 @@ QFrame#settingsRail {
     border-radius: %(surface)spx;
 }
 QFrame#chatSurface {
-    background: %(surface_window)s;
-    border: 1px solid %(border)s;
+    background: %(canvas)s;
+    border: 0;
     border-radius: %(surface)spx;
 }
 QFrame#chatSessionRail {
@@ -69,11 +69,9 @@ QFrame#chatSessionRail {
     border-top-left-radius: %(surface)spx;
     border-bottom-left-radius: %(surface)spx;
 }
-QFrame#chatAppBar {
-    background: %(surface_window)s;
-    border-bottom: 1px solid %(border)s;
-    border-top-left-radius: %(surface)spx;
-    border-top-right-radius: %(surface)spx;
+QFrame#chatControlBar {
+    background: %(canvas)s;
+    border: 0;
 }
 QFrame#conversationCanvas {
     background: %(canvas)s;
@@ -102,8 +100,8 @@ QFrame#contextChip {
 }
 QFrame#chatTranscript {
     background: %(canvas)s;
-    border: 1px solid %(border)s;
-    border-radius: %(surface)spx;
+    border: 0;
+    border-radius: 0;
 }
 QFrame#chatBubbleAssistant {
     background: transparent;
@@ -130,16 +128,6 @@ QFrame#conversationHeader {
     border: 1px solid %(border_card)s;
     border-radius: %(surface)spx;
 }
-QFrame#chatHeader {
-    background: %(surface_card)s;
-    border: 1px solid %(border_card)s;
-    border-radius: %(surface)spx;
-}
-QFrame#memoryStrip {
-    background: %(surface_control)s;
-    border: 1px solid %(border_control)s;
-    border-radius: %(control)spx;
-}
 QFrame#controlPlan {
     background: %(plan_surface)s;
     border: 1px solid %(plan_border)s;
@@ -162,9 +150,9 @@ QFrame#assistantAvatar {
     border-radius: 15px;
 }
 QFrame#emptyState {
-    background: %(surface_panel)s;
-    border: 1px dashed %(empty_border)s;
-    border-radius: %(surface)spx;
+    background: transparent;
+    border: 0;
+    border-radius: 0;
 }
 QFrame#hairline {
     background: %(divider)s;
@@ -233,32 +221,10 @@ QLabel#statusPill {
     font-size: 11px;
     font-weight: 650;
 }
-QLabel#composerChip {
-    color: %(text_secondary)s;
-    background: %(surface_control)s;
-    border: 1px solid %(border_control)s;
-    border-radius: %(control)spx;
-    padding: 6px 9px;
-    font-size: 11px;
-}
 QLabel#sessionTitle {
     color: %(text_primary)s;
     font-size: 14px;
     font-weight: 700;
-}
-QLabel#breadcrumbLabel {
-    color: %(text_primary)s;
-    font-size: 13px;
-    font-weight: 700;
-}
-QLabel#appMetric {
-    color: %(text_subtle)s;
-    font-size: 11px;
-}
-QLabel#liveMetric {
-    color: %(state_success)s;
-    font-size: 11px;
-    font-weight: 650;
 }
 QLabel#railSectionTitle {
     color: %(text_subtle)s;

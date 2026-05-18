@@ -24,6 +24,7 @@ from PySide6.QtWidgets import (
     QMenu,
     QPushButton,
     QScrollArea,
+    QSizePolicy,
     QSizeGrip,
     QSpinBox,
     QTextEdit,
@@ -661,23 +662,14 @@ class ChatDialog(QDialog):
         self.context_check: QCheckBox | None = None
         self.context_chip: QFrame | None = None
         self.waiting_for_reply = False
-        self.session_rail_visible = True
-        self.tool_rail_visible = True
+        self.session_rail_visible = False
+        self.tool_rail_visible = False
         self.session_rail: QFrame | None = None
         self.tool_rail: QFrame | None = None
         self.active_session_id = active_session.session_id if active_session is not None else ""
         self.all_sessions: list[ConversationSession] = []
         self.message_widgets: list[QWidget] = []
         self.control_plan_buttons: dict[str, tuple[QPushButton, QPushButton, QLabel]] = {}
-
-        self.status_label = styled_label("就绪", "statusPill")
-        self.session_title_label = styled_label("新会话", "dialogTitle")
-        self.session_meta_label = styled_label("", "mutedLabel")
-        self.memory_label = styled_label("暂无会话记忆", "mutedLabel", True)
-        self.context_state_label = styled_label("未加载文件上下文", "mutedLabel", True)
-        self.chat_breadcrumb_label = styled_label(f"{APP_NAME} / 新会话", "breadcrumbLabel")
-        self.chat_run_label = styled_label("● 就绪", "liveMetric")
-        self.chat_metrics_label = styled_label("本地 · 0 条消息 · 工具需授权", "appMetric")
 
         self.session_list = QListWidget()
         self.session_list.setObjectName("sessionList")
@@ -700,8 +692,8 @@ class ChatDialog(QDialog):
 
         self.history_content = make_transparent(QWidget())
         self.history_layout = QVBoxLayout(self.history_content)
-        self.history_layout.setContentsMargins(22, 20, 22, 20)
-        self.history_layout.setSpacing(16)
+        self.history_layout.setContentsMargins(8, 12, 8, 10)
+        self.history_layout.setSpacing(14)
         self.history_layout.setAlignment(Qt.AlignmentFlag.AlignTop)
 
         self.history_scroll = transparent_scroll_area()
@@ -711,24 +703,20 @@ class ChatDialog(QDialog):
         self.text_edit = QTextEdit()
         self.text_edit.setObjectName("chatInput")
         self.text_edit.setPlaceholderText("告诉桌宠你的目标、卡点，或输入 / 命令调用工具")
-        self.text_edit.setMinimumHeight(78)
-        self.text_edit.setMaximumHeight(132)
+        self.text_edit.setMinimumHeight(64)
+        self.text_edit.setMaximumHeight(96)
 
         send_button = QPushButton("发送")
         mark_button(send_button, "primaryButton")
         send_button.clicked.connect(self.submit_message)
         self.send_button = send_button
 
-        dialog_close_button = QPushButton("关闭")
-        mark_button(dialog_close_button, "secondaryButton")
-        dialog_close_button.clicked.connect(self.reject)
-
-        self.session_toggle_button = QPushButton("隐藏会话")
+        self.session_toggle_button = QPushButton("会话")
         mark_button(self.session_toggle_button, "railToggleButton")
         self.session_toggle_button.setToolTip("折叠或展开左侧会话栏")
         self.session_toggle_button.clicked.connect(self.toggle_session_rail)
 
-        self.tool_toggle_button = QPushButton("隐藏工具")
+        self.tool_toggle_button = QPushButton("工具")
         mark_button(self.tool_toggle_button, "railToggleButton")
         self.tool_toggle_button.setToolTip("折叠或展开右侧工具栏")
         self.tool_toggle_button.clicked.connect(self.toggle_tool_rail)
@@ -739,17 +727,15 @@ class ChatDialog(QDialog):
         panel_layout.setContentsMargins(0, 0, 0, 0)
         panel_layout.setSpacing(12)
 
-        app_bar = QFrame()
-        app_bar.setObjectName("chatAppBar")
-        app_bar_layout = QHBoxLayout(app_bar)
-        app_bar_layout.setContentsMargins(14, 9, 14, 9)
-        app_bar_layout.setSpacing(12)
-        app_bar_layout.addWidget(self.session_toggle_button, 0)
-        app_bar_layout.addWidget(self.chat_breadcrumb_label, 1)
-        app_bar_layout.addWidget(self.chat_run_label)
-        app_bar_layout.addWidget(self.chat_metrics_label)
-        app_bar_layout.addWidget(self.tool_toggle_button, 0)
-        panel_layout.addWidget(app_bar, 0)
+        control_bar = QFrame()
+        control_bar.setObjectName("chatControlBar")
+        control_bar_layout = QHBoxLayout(control_bar)
+        control_bar_layout.setContentsMargins(8, 4, 8, 2)
+        control_bar_layout.setSpacing(8)
+        control_bar_layout.addWidget(self.session_toggle_button, 0)
+        control_bar_layout.addStretch(1)
+        control_bar_layout.addWidget(self.tool_toggle_button, 0)
+        panel_layout.addWidget(control_bar, 0)
 
         body = QHBoxLayout()
         body.setContentsMargins(0, 0, 0, 0)
@@ -777,48 +763,15 @@ class ChatDialog(QDialog):
         rail_layout.addLayout(rail_buttons)
         rail.setMaximumWidth(232)
         self.session_rail = rail
+        self.session_rail.setVisible(self.session_rail_visible)
         body.addWidget(rail, 0)
 
         center = QFrame()
         center.setObjectName("conversationCanvas")
         conversation = QVBoxLayout()
         center.setLayout(conversation)
-        conversation.setContentsMargins(16, 14, 16, 14)
-        conversation.setSpacing(12)
-
-        header = QFrame()
-        header.setObjectName("chatHeader")
-        header_layout = QVBoxLayout(header)
-        header_layout.setContentsMargins(14, 12, 14, 12)
-        header_layout.setSpacing(8)
-        title_row = QHBoxLayout()
-        title_row.setContentsMargins(0, 0, 0, 0)
-        title_row.setSpacing(10)
-        title_box = QVBoxLayout()
-        title_box.setContentsMargins(0, 0, 0, 0)
-        title_box.setSpacing(2)
-        title_box.addWidget(self.session_title_label)
-        title_box.addWidget(self.session_meta_label)
-        title_row.addLayout(title_box, 1)
-        title_row.addWidget(self.status_label)
-        header_layout.addLayout(title_row)
-        info_row = QHBoxLayout()
-        info_row.setContentsMargins(0, 0, 0, 0)
-        info_row.setSpacing(8)
-        memory_strip = QFrame()
-        memory_strip.setObjectName("memoryStrip")
-        memory_layout = QVBoxLayout(memory_strip)
-        memory_layout.setContentsMargins(10, 7, 10, 7)
-        memory_layout.addWidget(self.memory_label)
-        info_row.addWidget(memory_strip, 1)
-        context_strip = QFrame()
-        context_strip.setObjectName("memoryStrip")
-        context_layout = QVBoxLayout(context_strip)
-        context_layout.setContentsMargins(10, 7, 10, 7)
-        context_layout.addWidget(self.context_state_label)
-        info_row.addWidget(context_strip, 1)
-        header_layout.addLayout(info_row)
-        conversation.addWidget(header, 0)
+        conversation.setContentsMargins(6, 4, 6, 8)
+        conversation.setSpacing(10)
 
         transcript = QFrame()
         transcript.setObjectName("chatTranscript")
@@ -831,7 +784,7 @@ class ChatDialog(QDialog):
         composer = QFrame()
         composer.setObjectName("chatComposer")
         composer_layout = QVBoxLayout(composer)
-        composer_layout.setContentsMargins(12, 10, 12, 12)
+        composer_layout.setContentsMargins(12, 9, 12, 10)
         composer_layout.setSpacing(8)
         if context_hint:
             self.context_chip = QFrame()
@@ -848,17 +801,12 @@ class ChatDialog(QDialog):
             chip_close_button.clicked.connect(self.remove_drop_context)
             chip_layout.addWidget(chip_close_button)
             composer_layout.addWidget(self.context_chip)
-            self.context_state_label.setText(context_hint)
         composer_layout.addWidget(self.text_edit)
 
         composer_buttons = QHBoxLayout()
         composer_buttons.setContentsMargins(0, 0, 0, 0)
         composer_buttons.setSpacing(8)
-        composer_buttons.addWidget(self.make_composer_chip("记忆随配置", "使用设置里的 Memory 开关决定是否带会话上下文。"))
-        composer_buttons.addWidget(self.make_composer_chip("工具需授权", "写入、打开、运行命令会先生成授权卡。"))
-        composer_buttons.addWidget(self.make_tool_button("/pwd", "/pwd", "插入查看当前目录命令。"))
         composer_buttons.addStretch(1)
-        composer_buttons.addWidget(dialog_close_button)
         composer_buttons.addWidget(send_button)
         composer_layout.addLayout(composer_buttons)
         conversation.addWidget(composer, 0)
@@ -914,6 +862,7 @@ class ChatDialog(QDialog):
         tool_scroll.setWidget(tool_content)
         tool_rail_layout.addWidget(tool_scroll, 1)
         self.tool_rail = tool_rail
+        self.tool_rail.setVisible(self.tool_rail_visible)
         body.addWidget(tool_rail, 0)
         panel_layout.addLayout(body, 1)
 
@@ -940,11 +889,6 @@ class ChatDialog(QDialog):
     def text(self) -> str:
         return self.text_edit.toPlainText().strip()
 
-    def make_composer_chip(self, text: str, tooltip: str) -> QLabel:
-        label = styled_label(text, "composerChip")
-        label.setToolTip(tooltip)
-        return label
-
     def make_tool_button(self, label: str, template: str, tooltip: str) -> QPushButton:
         button = QPushButton(label)
         mark_button(button, "toolChipButton")
@@ -965,13 +909,13 @@ class ChatDialog(QDialog):
         self.session_rail_visible = not self.session_rail_visible
         if self.session_rail is not None:
             self.session_rail.setVisible(self.session_rail_visible)
-        self.session_toggle_button.setText("隐藏会话" if self.session_rail_visible else "显示会话")
+        self.session_toggle_button.setText("隐藏会话" if self.session_rail_visible else "会话")
 
     def toggle_tool_rail(self) -> None:
         self.tool_rail_visible = not self.tool_rail_visible
         if self.tool_rail is not None:
             self.tool_rail.setVisible(self.tool_rail_visible)
-        self.tool_toggle_button.setText("隐藏工具" if self.tool_rail_visible else "显示工具")
+        self.tool_toggle_button.setText("隐藏工具" if self.tool_rail_visible else "工具")
 
     def set_sessions(self, sessions: list[ConversationSession], active_session_id: str) -> None:
         self.all_sessions = list(sessions)
@@ -1031,27 +975,8 @@ class ChatDialog(QDialog):
     ) -> None:
         if session is not None:
             self.active_session_id = session.session_id
-            title = session.title or "新会话"
-            self.session_title_label.setText(title)
-            self.session_meta_label.setText(
-                f"{format_session_time(session.updated_at)} · {session.message_count} 条消息"
-            )
-            self.chat_breadcrumb_label.setText(f"{APP_NAME} / {compact_text(title, 48)}")
-            self.chat_metrics_label.setText(f"本地 · {session.message_count} 条消息 · 工具需授权")
-            if session.memory_items:
-                preview = " · ".join(session.memory_items[-2:])
-                self.memory_label.setText(f"记忆 {len(session.memory_items)} 条：{preview}")
-            elif session.summary:
-                self.memory_label.setText(f"摘要：{session.summary}")
-            else:
-                self.memory_label.setText("暂无会话记忆")
         else:
             self.active_session_id = ""
-            self.session_title_label.setText("新会话")
-            self.session_meta_label.setText("")
-            self.memory_label.setText("暂无会话记忆")
-            self.chat_breadcrumb_label.setText(f"{APP_NAME} / 新会话")
-            self.chat_metrics_label.setText("本地 · 0 条消息 · 工具需授权")
         if messages is not None:
             self.set_history(messages)
 
@@ -1084,14 +1009,15 @@ class ChatDialog(QDialog):
         empty = QFrame()
         empty.setObjectName("emptyState")
         empty_layout = QVBoxLayout(empty)
-        empty_layout.setContentsMargins(22, 24, 22, 24)
-        empty_layout.setSpacing(8)
-        title = styled_label("开始和桌宠导师对话", "dialogTitle")
+        empty_layout.setContentsMargins(18, 18, 18, 18)
+        empty_layout.setSpacing(6)
+        title = styled_label("开始对话", "sectionTitle")
         title.setAlignment(Qt.AlignmentFlag.AlignCenter)
-        subtitle = styled_label("描述目标、卡点或拖入文件；工具调用会在需要时请求授权。", "mutedLabel", True)
+        subtitle = styled_label("直接写目标或问题，需要工具时会在会话中请求授权。", "mutedLabel", True)
         subtitle.setAlignment(Qt.AlignmentFlag.AlignCenter)
         empty_layout.addWidget(title)
         empty_layout.addWidget(subtitle)
+        empty_layout.addStretch(1)
         self.history_layout.addWidget(empty)
         self.message_widgets = [empty]
 
@@ -1123,24 +1049,21 @@ class ChatDialog(QDialog):
         self.remove_empty_state()
 
         row = make_transparent(QWidget())
+        row.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Maximum)
         row_layout = QHBoxLayout(row)
         row_layout.setContentsMargins(0, 0, 0, 0)
         row_layout.setSpacing(10)
 
         bubble = QFrame()
         bubble.setObjectName("chatBubbleUser" if role == "user" else "chatBubbleAssistant")
-        bubble.setMaximumWidth(610 if role == "assistant" else 560)
+        bubble.setMaximumWidth(840 if role == "assistant" else 680)
         bubble_layout = QVBoxLayout(bubble)
-        bubble_layout.setContentsMargins(14, 11, 14, 11)
-        bubble_layout.setSpacing(7)
+        bubble_layout.setContentsMargins(14, 10, 14, 10)
+        bubble_layout.setSpacing(0)
 
-        role_label = styled_label("你" if role == "user" else f"{APP_NAME} · 桌宠导师", "chatRole")
         message_label = styled_label(text, "chatText", True)
         message_label.setTextInteractionFlags(Qt.TextInteractionFlag.TextSelectableByMouse)
-        meta_label = styled_label(self.format_message_time(ts), "chatMeta")
-        bubble_layout.addWidget(role_label)
         bubble_layout.addWidget(message_label)
-        bubble_layout.addWidget(meta_label)
 
         if role == "user":
             row_layout.addStretch(1)
@@ -1162,6 +1085,7 @@ class ChatDialog(QDialog):
     def add_control_plan(self, plan_id: str, title: str, details: str, requires_confirmation: bool) -> None:
         self.remove_empty_state()
         row = make_transparent(QWidget())
+        row.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Maximum)
         row_layout = QHBoxLayout(row)
         row_layout.setContentsMargins(0, 0, 0, 0)
         row_layout.setSpacing(10)
@@ -1240,23 +1164,13 @@ class ChatDialog(QDialog):
         cancel_button.setEnabled(enabled)
         status_label.setText(status)
 
-    @staticmethod
-    def format_message_time(ts: int | None) -> str:
-        if not ts:
-            return ""
-        try:
-            return time.strftime("%H:%M", time.localtime(int(ts)))
-        except Exception:
-            return ""
-
     def scroll_to_bottom(self) -> None:
         QTimer.singleShot(0, lambda: self.history_scroll.verticalScrollBar().setValue(self.history_scroll.verticalScrollBar().maximum()))
 
     def set_waiting(self, waiting: bool) -> None:
         self.waiting_for_reply = waiting
         self.send_button.setEnabled(not waiting)
-        self.status_label.setText("导师正在思考" if waiting else "就绪")
-        self.chat_run_label.setText("● 思考中" if waiting else "● 就绪")
+        self.send_button.setText("思考中" if waiting else "发送")
 
     def submit_message(self) -> None:
         if self.waiting_for_reply:
@@ -1282,7 +1196,6 @@ class ChatDialog(QDialog):
         self.context_removed = True
         if self.context_chip is not None:
             self.context_chip.hide()
-        self.context_state_label.setText("文件上下文已移除")
 
     def showEvent(self, event) -> None:  # type: ignore[override]
         super().showEvent(event)
