@@ -102,6 +102,7 @@ from PySide6.QtCore import Qt
 from PySide6.QtWidgets import QApplication, QFrame, QMenu, QPushButton, QScrollArea
 
 from desktop_mentor_app import config_store
+from desktop_mentor_app.agent_client import agent_system_prompt
 from desktop_mentor_app.assets import DEFAULT_IMAGE, DEFAULT_STICKERS_DIR, ROOT
 from desktop_mentor_app.config_store import AgentConfig, new_default_config
 from desktop_mentor_app.control import PermissionLevel, build_control_plan, execute_control_plan
@@ -275,11 +276,13 @@ with tempfile.TemporaryDirectory() as tmp:
     assert loaded_messages.memory_enabled is False
     assert loaded_messages.control_enabled is True
     configured_desktop = Path(tmp) / "configured-desktop"
+    configured_desktop.mkdir()
     (Path(tmp) / "user-dirs.dirs").write_text(f'XDG_DESKTOP_DIR="{configured_desktop}"\n', encoding="utf-8")
     assert desktop_path() == configured_desktop.resolve(strict=False)
     control_root = Path(tmp) / "control-root"
     control_root.mkdir()
     (control_root / "input.txt").write_text("alpha\nbeta\n", encoding="utf-8")
+    (configured_desktop / "Nature_manuscript.txt").write_text("draft abstract", encoding="utf-8")
     sys_plan = build_control_plan("/sys", str(control_root))
     assert sys_plan is not None and sys_plan.permission == PermissionLevel.READ_ONLY
     assert execute_control_plan(sys_plan).ok
@@ -289,6 +292,14 @@ with tempfile.TemporaryDirectory() as tmp:
     assert read_plan is not None
     read_result = execute_control_plan(read_plan)
     assert read_result.ok and "alpha" in read_result.output
+    nl_read_plan = build_control_plan("帮我看一下桌面的 Nature_manuscript.txt", str(control_root))
+    assert nl_read_plan is not None and nl_read_plan.permission == PermissionLevel.READ_ONLY
+    assert nl_read_plan.action == "read_file", nl_read_plan
+    assert Path(str(nl_read_plan.args["path"])) == configured_desktop.resolve(strict=False) / "Nature_manuscript.txt"
+    nl_read_result = execute_control_plan(nl_read_plan)
+    assert nl_read_result.ok and "draft abstract" in nl_read_result.output
+    system_prompt = agent_system_prompt(AgentConfig(system_prompt="自定义风格"))
+    assert "不要让用户手动运行 type/cat/powershell" in system_prompt
     search_plan = build_control_plan("/search beta .", str(control_root))
     assert search_plan is not None
     search_result = execute_control_plan(search_plan)

@@ -12,6 +12,7 @@ icons/
 build/
 dist/
 screenshots/
+tauri-ui/
 *.log
 *.tmp
 *.spec.bak

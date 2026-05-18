@@ -14,6 +14,12 @@ from .constants import (
     MAX_AGENT_REPLY_CHARS,
 )
 
+CONTROL_AWARENESS_PROMPT = """运行边界：
+- 这个桌宠内置受控电脑操作层，可读取文件、列目录、搜索文本，并在写入/打开/运行前弹出授权卡。
+- 用户要求读取、查看、分析桌面或本机文件时，不要让用户手动运行 type/cat/powershell 等系统命令再复制输出。
+- 如果当前请求需要本机操作，应说明会通过内置电脑控制或授权卡处理；如果没有弹出工具结果，再提示用户检查设置里的 Computer control。
+- 不要声称已经读取没有实际读取的文件内容。"""
+
 
 def normalize_chat_url(raw_url: str) -> str:
     url = raw_url.strip().rstrip("/")
@@ -88,6 +94,13 @@ def append_memory_turn(user_text: str, assistant_text: str) -> None:
             handle.write(json.dumps(record, ensure_ascii=False) + "\n")
 
 
+def agent_system_prompt(config: AgentConfig) -> str:
+    base_prompt = str(config.system_prompt or DEFAULT_PERSONALITY_PROMPT).strip()
+    if CONTROL_AWARENESS_PROMPT in base_prompt:
+        return base_prompt
+    return f"{base_prompt}\n\n{CONTROL_AWARENESS_PROMPT}"
+
+
 def call_agent(config: AgentConfig, user_text: str) -> str:
     url = normalize_chat_url(config.api_url)
     if not url:
@@ -96,7 +109,7 @@ def call_agent(config: AgentConfig, user_text: str) -> str:
     payload = {
         "model": config.model or DEFAULT_MODEL,
         "messages": [
-            {"role": "system", "content": config.system_prompt or DEFAULT_PERSONALITY_PROMPT},
+            {"role": "system", "content": agent_system_prompt(config)},
         ],
         "temperature": 0.8,
         "max_tokens": 160,

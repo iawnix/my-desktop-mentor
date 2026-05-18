@@ -39,6 +39,7 @@ HELP_TEXT = """电脑控制命令：
 """
 
 WRITABLE_TEXT_SUFFIXES = (".txt", ".md", ".log", ".csv", ".json")
+READABLE_TEXT_SUFFIXES = WRITABLE_TEXT_SUFFIXES + (".tex", ".rst")
 WINDOWS_FORBIDDEN_FILENAME_CHARS = re.compile(r'[<>:"/\\|?*\x00-\x1f]')
 
 
@@ -157,7 +158,19 @@ def quoted_segments(text: str) -> list[str]:
 
 def looks_like_filename(value: str) -> bool:
     lowered = value.strip().lower()
-    return any(lowered.endswith(suffix) for suffix in WRITABLE_TEXT_SUFFIXES)
+    return any(lowered.endswith(suffix) for suffix in READABLE_TEXT_SUFFIXES)
+
+
+def extract_mentioned_filename(text: str) -> str:
+    for segment in quoted_segments(text):
+        name = segment.replace("\\", "/").rsplit("/", 1)[-1]
+        if looks_like_filename(name):
+            return safe_desktop_filename(name)
+    match = re.search(r"([A-Za-z0-9_\-\u4e00-\u9fff][A-Za-z0-9_\-\u4e00-\u9fff .]*\.(?:txt|md|log|csv|json|tex|rst))", text, re.IGNORECASE)
+    if match:
+        name = match.group(1).replace("\\", "/").rsplit("/", 1)[-1].split()[-1]
+        return safe_desktop_filename(name)
+    return ""
 
 
 def safe_desktop_filename(value: str) -> str:
@@ -172,12 +185,9 @@ def safe_desktop_filename(value: str) -> str:
 
 
 def extract_filename(text: str) -> str:
-    for segment in quoted_segments(text):
-        if looks_like_filename(segment):
-            return safe_desktop_filename(segment)
-    match = re.search(r"([A-Za-z0-9_\-\u4e00-\u9fff][A-Za-z0-9_\-\u4e00-\u9fff .]*\.(?:txt|md|log|csv|json))", text, re.IGNORECASE)
-    if match:
-        return safe_desktop_filename(match.group(1))
+    mentioned_name = extract_mentioned_filename(text)
+    if mentioned_name:
+        return mentioned_name
     name_match = re.search(
         r"(?:文件名|名字|命名为|名为|叫)[是为叫：:\s]*([A-Za-z0-9_\-\u4e00-\u9fff][A-Za-z0-9_\-\u4e00-\u9fff .]{0,48})",
         text,
@@ -218,7 +228,37 @@ def extract_write_content(text: str) -> str:
     return ""
 
 
+def build_natural_language_read_plan(text: str, workspace: Path) -> ControlPlan | None:
+    normalized = " ".join(text.split())
+    lowered = normalized.lower()
+    mentions_desktop = "桌面" in normalized or "desktop" in lowered or "%userprofile%" in lowered
+    wants_read = any(
+        keyword in normalized
+        for keyword in ("读取", "读一下", "读下", "查看", "看一下", "看下", "帮我看", "检查", "分析", "总结", "审稿", "润色")
+    ) or any(keyword in lowered for keyword in ("read", "view", "check", "review", "analyze", "summarize", "type "))
+    filename = extract_mentioned_filename(normalized)
+    if not (mentions_desktop and wants_read and filename):
+        return None
+    target = (desktop_path() / filename).expanduser().resolve(strict=False)
+    permission, reason = can_read_path(target)
+    if permission == PermissionLevel.BLOCKED:
+        return blocked_plan(text, "读取桌面文件被阻止", reason, [f"目标：{target}"])
+    return ControlPlan(
+        new_plan_id(),
+        text,
+        "read_file",
+        "读取桌面文件",
+        [f"读取文本预览：{target}"],
+        {"path": str(target), "workspace": str(workspace)},
+        permission,
+    )
+
+
 def build_natural_language_plan(text: str, workspace: Path) -> ControlPlan | None:
+    read_plan = build_natural_language_read_plan(text, workspace)
+    if read_plan is not None:
+        return read_plan
+
     normalized = " ".join(text.split())
     lowered = normalized.lower()
     mentions_desktop = "桌面" in normalized or "desktop" in lowered
