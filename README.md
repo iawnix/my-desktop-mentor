@@ -33,6 +33,8 @@
 - `desktop_mentor_app/drop_context.py`：文件/文件夹拖放上下文收集、敏感路径跳过和 prompt 拼接。
 - `desktop_mentor_app/ui/dialogs.py`：设置、对话、详情、待办和满屏提醒窗口。
 - `desktop_mentor_app/ui/pet_widget.py`：透明桌宠窗口、绘制、鼠标/触屏拖动、按钮、菜单和 bubble 布局。
+- `desktop_mentor_app/ui/tokens.py`：UI 尺寸、间距、动作动画和 Fluent Dark 主题参数。
+- `desktop_mentor_app/ui/theme.py`：集中生成 QSS，不承载对话、记忆、控制等业务逻辑。
 - `requirements.txt`：源码运行依赖。
 - `scripts/linux/run_desktop_mentor.sh`：Linux 启动脚本。
 - `scripts/linux/self_test.sh`：Linux 一键自测脚本。
@@ -54,6 +56,8 @@
 cd my-desktop-mentor
 ./scripts/linux/run_desktop_mentor.sh
 ```
+
+在 GNOME/Wayland 桌面下，启动脚本会优先探测可用的 XWayland/xcb 后端，因为普通 Qt 顶层窗口在 Wayland 下不能总是可靠执行程序式移动；如果 xcb 不可用，会回退到 Wayland 并使用 Qt 原生系统移动接口作为拖动兜底。右键菜单同时兼容鼠标右键和系统上下文菜单事件。
 
 直接用 Python 运行也可以，但需要当前 Python 能导入 `PySide6`：
 
@@ -175,11 +179,13 @@ stickers/
   error/*.png
 ```
 
-对话窗口是本地会话管理器：左侧列出历史会话，右侧显示当前会话记录和本地摘要/记忆提示。新会话、切换会话、清空当前会话都只操作用户配置目录，不写入项目目录。存储位置是 `conversations/sessions.json`、`conversations/active_session.txt` 和每个会话自己的 `conversations/<session-id>.jsonl`；首次升级时会把旧的 `chat_history.jsonl` 或 `memory.jsonl` 迁移成一个会话。
+对话窗口是本地会话管理器：左侧按 `当前会话` / `最近会话` 分组列出历史会话并支持搜索，中间显示当前会话记录和输入区，右侧提供常用工具与授权动作入口。左右栏都可以从顶部状态栏折叠，左侧会话列表和右侧工具栏内容都可滚动，让中间会话区在需要阅读长对话时获得更多宽度。整体信息架构参考 Palot 这类 agent 桌面工作台的高密度布局，但仍保留 PySide6 桌宠的伴随窗口形态，不引入 Electron/React 依赖。用户消息、桌宠导师回复和电脑操作授权卡使用不同的消息形态；新会话、切换会话、清空当前会话都只操作用户配置目录，不写入项目目录。存储位置是 `conversations/sessions.json`、`conversations/active_session.txt` 和每个会话自己的 `conversations/<session-id>.jsonl`；首次升级时会把旧的 `chat_history.jsonl` 或 `memory.jsonl` 迁移成一个会话。
+
+设置、对话、待办和文件摘要窗口都是桌宠旁的伴随窗口，右下角带缩放手柄；标题栏可拖动窗口，不会替代桌宠主窗口。当前窗口主题采用本地 QSS 实现的 Fluent Dark 风格，不额外引入 QFluentWidgets 依赖；颜色、圆角、滚动条和控件尺寸集中放在 `desktop_mentor_app/ui/tokens.py`，窗口逻辑只使用语义化 `objectName`。
 
 启用 `Memory` 后，程序会把当前会话摘要、命中的记忆条目和最近若干轮消息作为上下文带给 agent；同时保留旧 `memory.jsonl` 作为兼容记忆。默认关闭，不会把历史无条件发给模型，也不会写入项目目录。
 
-启用 `Computer control` 后，对话窗口支持受控电脑操作。读操作会直接执行；运行命令、打开路径/链接、创建或写入文件会先在会话里显示授权卡片，用户点击 `授权执行` 后才动手，点击 `取消` 则不会执行。明确的自然语言请求也会走同一套授权流程，例如“请在桌面创建一个文件 `mentor-note.txt`，内容是「hello」”。
+启用 `Computer control` 后，对话窗口支持受控电脑操作。读操作会直接执行；运行命令、打开路径/链接、创建或写入文件会先在会话里显示授权卡片，卡片包含工具类别、目标详情和代码风格预览；用户点击 `允许本次` 后才动手，点击 `拒绝` 则不会执行。明确的自然语言请求也会走同一套授权流程，例如“请在桌面创建一个文件 `mentor-note.txt`，内容是「hello」”。
 
 支持的第一阶段/第二阶段命令：
 

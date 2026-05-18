@@ -1,11 +1,11 @@
-"""Dialog widgets and shared QSS."""
+"""Dialog widgets for the desktop mentor."""
 from __future__ import annotations
 
 import time
 from pathlib import Path
 
 from PySide6.QtCore import QDateTime, QPoint, QRect, QRectF, QTimer, Qt, QEvent, Signal
-from PySide6.QtGui import QColor, QFont, QGuiApplication, QMouseEvent, QPainter, QPen, QPixmap
+from PySide6.QtGui import QColor, QFont, QGuiApplication, QMouseEvent, QPainter, QPen, QPixmap, QTextCursor, QBrush
 from PySide6.QtWidgets import (
     QCheckBox,
     QComboBox,
@@ -24,6 +24,7 @@ from PySide6.QtWidgets import (
     QMenu,
     QPushButton,
     QScrollArea,
+    QSizeGrip,
     QSpinBox,
     QTextEdit,
     QVBoxLayout,
@@ -63,364 +64,9 @@ from ..constants import (
 )
 from ..stickers import discover_sticker_sets, normalize_sticker_sets
 from ..todo_store import format_due_time, load_todos_from_items
+from .theme import apply_app_theme
 from .tokens import FULLSCREEN_ALERT_DURATION_MS
 
-
-APP_STYLESHEET = """
-* {
-    font-family: "SF Pro Text", "Segoe UI", "Noto Sans CJK SC", "Microsoft YaHei", sans-serif;
-}
-QDialog {
-    background: transparent;
-    color: #dce6f3;
-    font-size: 13px;
-}
-QWidget#dialogSurface {
-    background: transparent;
-}
-QWidget#transparentSurface, QFrame#transparentSurface, QWidget#transparentViewport {
-    background: transparent;
-    border: 0;
-}
-QScrollArea#transparentScrollArea {
-    background: transparent;
-    border: 0;
-}
-QScrollArea#transparentScrollArea > QWidget, QScrollArea#transparentScrollArea QWidget#transparentViewport {
-    background: transparent;
-    border: 0;
-}
-QFrame#dialogShell {
-    background: #101827;
-    border: 1px solid #25364f;
-    border-radius: 18px;
-}
-QFrame#titleBar {
-    background: #101827;
-    border-top-left-radius: 18px;
-    border-top-right-radius: 18px;
-    border-bottom: 1px solid #25364f;
-}
-QFrame#settingsRail {
-    background: #0d1523;
-    border: 1px solid #22324a;
-    border-radius: 16px;
-}
-QFrame#sectionCard, QFrame#glassPanel {
-    background: #111b2b;
-    border: 1px solid #263852;
-    border-radius: 14px;
-}
-QFrame#contextChip {
-    background: #0d1726;
-    border: 1px solid #2a4161;
-    border-radius: 12px;
-}
-QFrame#chatTranscript {
-    background: #0a111d;
-    border: 1px solid #263852;
-    border-radius: 14px;
-}
-QFrame#chatBubbleAssistant {
-    background: #111b2b;
-    border: 1px solid #2a4161;
-    border-radius: 14px;
-}
-QFrame#chatBubbleUser {
-    background: #1e4f7d;
-    border: 1px solid #4a9ad6;
-    border-radius: 14px;
-}
-QFrame#chatComposer {
-    background: #0d1523;
-    border: 1px solid #22324a;
-    border-radius: 14px;
-}
-QFrame#sessionRail {
-    background: #0d1523;
-    border: 1px solid #22324a;
-    border-radius: 14px;
-}
-QFrame#conversationHeader {
-    background: #0d1726;
-    border: 1px solid #25364f;
-    border-radius: 14px;
-}
-QFrame#memoryStrip {
-    background: #101827;
-    border: 1px solid #2a4161;
-    border-radius: 12px;
-}
-QFrame#controlPlan {
-    background: #102033;
-    border: 1px solid #3b6a92;
-    border-radius: 14px;
-}
-QFrame#hairline {
-    background: #24364f;
-    border: 0;
-    min-height: 1px;
-    max-height: 1px;
-}
-QFrame#settingsFooter {
-    background: #0d1523;
-    border-top: 1px solid #25364f;
-    border-bottom-left-radius: 18px;
-    border-bottom-right-radius: 18px;
-}
-QLabel {
-    color: #d7dfec;
-    background: transparent;
-}
-QLabel#dialogTitle {
-    color: #edf4fb;
-    font-size: 18px;
-    font-weight: 700;
-}
-QLabel#windowCaption {
-    color: #dce6f3;
-    font-size: 13px;
-    font-weight: 650;
-}
-QLabel#dialogSubtitle, QLabel#mutedLabel {
-    color: #8da0b8;
-}
-QLabel#sectionTitle {
-    color: #e8f0fa;
-    font-size: 14px;
-    font-weight: 650;
-}
-QLabel#railTitle {
-    color: #dce6f3;
-    font-size: 15px;
-    font-weight: 700;
-}
-QLabel#chatRole {
-    color: #8da0b8;
-    font-size: 11px;
-    font-weight: 650;
-}
-QLabel#chatText {
-    color: #edf4fb;
-    font-size: 13px;
-    line-height: 1.35em;
-}
-QLabel#chatMeta {
-    color: #72849b;
-    font-size: 11px;
-}
-QLabel#sessionTitle {
-    color: #edf4fb;
-    font-size: 14px;
-    font-weight: 700;
-}
-QLineEdit, QTextEdit, QSpinBox, QDoubleSpinBox, QDateTimeEdit, QComboBox, QListWidget {
-    background: #0a111d;
-    border: 1px solid #2a3c56;
-    border-radius: 11px;
-    color: #edf4fb;
-    padding: 9px 11px;
-    selection-background-color: #2f7fc7;
-    selection-color: #ffffff;
-}
-QLineEdit:hover, QTextEdit:hover, QSpinBox:hover, QDoubleSpinBox:hover, QDateTimeEdit:hover, QComboBox:hover, QListWidget:hover {
-    border-color: #3e6f9e;
-}
-QLineEdit:focus, QTextEdit:focus, QSpinBox:focus, QDoubleSpinBox:focus, QDateTimeEdit:focus, QComboBox:focus, QListWidget:focus {
-    border: 1px solid #4a9ad6;
-    background: #0d1726;
-}
-QTextEdit {
-    padding: 12px;
-}
-QCheckBox {
-    color: #d7dfec;
-    spacing: 9px;
-}
-QCheckBox::indicator {
-    width: 17px;
-    height: 17px;
-    border-radius: 6px;
-    border: 1px solid #344a68;
-    background: #0a111d;
-}
-QCheckBox::indicator:hover {
-    border-color: #4a9ad6;
-}
-QCheckBox::indicator:checked {
-    background: #2f7fc7;
-    border-color: #58a7de;
-}
-QPushButton {
-    background: #142033;
-    border: 1px solid #2b3f5b;
-    border-radius: 11px;
-    color: #edf4fb;
-    padding: 9px 15px;
-    min-height: 18px;
-}
-QPushButton:hover {
-    background: #182842;
-    border-color: #447eb2;
-}
-QPushButton:pressed {
-    background: #1e5787;
-}
-QPushButton#primaryButton {
-    background: #2f7fc7;
-    border: 1px solid #58a7de;
-    color: #ffffff;
-    font-weight: 650;
-}
-QPushButton#primaryButton:hover {
-    background: #368bd5;
-}
-QPushButton#secondaryButton {
-    background: #111b2b;
-}
-QPushButton#quietButton {
-    background: transparent;
-    border: 1px solid #263852;
-    color: #9db0c7;
-}
-QPushButton#quietButton:hover {
-    background: #111b2b;
-    border-color: #447eb2;
-    color: #edf4fb;
-}
-QPushButton#miniButton {
-    padding: 8px 12px;
-    min-width: 58px;
-}
-QPushButton#railNavButton, QPushButton#railNavButtonActive {
-    text-align: left;
-    border-radius: 10px;
-    padding: 9px 11px;
-    min-height: 20px;
-}
-QPushButton#railNavButton {
-    background: transparent;
-    border: 1px solid transparent;
-    color: #8fa3bb;
-}
-QPushButton#railNavButton:hover {
-    background: #111b2b;
-    border-color: #22324a;
-    color: #dce6f3;
-}
-QPushButton#railNavButtonActive {
-    background: #172842;
-    border: 1px solid #31567d;
-    color: #edf4fb;
-}
-QPushButton#chipCloseButton {
-    background: #101827;
-    border: 1px solid #2a4161;
-    border-radius: 10px;
-    color: #8da0b8;
-    padding: 2px 8px;
-    min-width: 22px;
-    max-width: 26px;
-    min-height: 22px;
-    max-height: 26px;
-}
-QPushButton#chipCloseButton:hover {
-    background: #172842;
-    color: #edf4fb;
-    border-color: #447eb2;
-}
-QPushButton#dangerButton {
-    background: #3a1c26;
-    border-color: #764153;
-}
-QPushButton#dangerButton:hover {
-    background: #4d2431;
-    border-color: #a35b70;
-}
-QPushButton#titleCloseButton {
-    background: transparent;
-    border: 1px solid transparent;
-    border-radius: 9px;
-    color: #8fa3bb;
-    font-size: 15px;
-    padding: 0;
-    min-width: 28px;
-    max-width: 28px;
-    min-height: 28px;
-    max-height: 28px;
-}
-QPushButton#titleCloseButton:hover {
-    background: #263852;
-    border-color: #3e6f9e;
-    color: #edf4fb;
-}
-QDialogButtonBox QPushButton {
-    min-width: 78px;
-}
-QComboBox::drop-down, QDateTimeEdit::drop-down, QSpinBox::up-button, QSpinBox::down-button, QDoubleSpinBox::up-button, QDoubleSpinBox::down-button {
-    border: 0;
-    width: 24px;
-}
-QScrollArea {
-    background: transparent;
-    border: 0;
-}
-QScrollBar:vertical {
-    background: transparent;
-    width: 10px;
-    margin: 8px 2px 8px 2px;
-}
-QScrollBar::handle:vertical {
-    background: #314560;
-    border-radius: 5px;
-    min-height: 34px;
-}
-QScrollBar::handle:vertical:hover {
-    background: #447eb2;
-}
-QScrollBar::add-line:vertical, QScrollBar::sub-line:vertical {
-    height: 0;
-}
-QListWidget {
-    outline: 0;
-    padding: 6px;
-}
-QListWidget::item {
-    border-radius: 10px;
-    padding: 10px 12px;
-    margin: 3px 0;
-    color: #dce6f3;
-}
-QListWidget::item:hover {
-    background: #172842;
-}
-QListWidget::item:selected {
-    background: #1e4f7d;
-    color: #ffffff;
-}
-QMenu {
-    background-color: #101827;
-    border: 1px solid #2a3c56;
-    border-radius: 12px;
-    color: #dce6f3;
-    padding: 7px;
-    margin: 0;
-}
-QMenu::item {
-    background: transparent;
-    border-radius: 10px;
-    padding: 9px 34px 9px 14px;
-}
-QMenu::item:selected {
-    background: #172842;
-    color: #ffffff;
-}
-QMenu::separator {
-    height: 1px;
-    background: #24364f;
-    margin: 7px 9px;
-}
-"""
 
 
 def styled_label(text: str, object_name: str, word_wrap: bool = False) -> QLabel:
@@ -486,12 +132,28 @@ def setup_modern_dialog(dialog: QDialog) -> None:
     dialog.setWindowFlag(Qt.WindowType.FramelessWindowHint, True)
     dialog.setAttribute(Qt.WidgetAttribute.WA_TranslucentBackground, True)
     dialog.setAttribute(Qt.WidgetAttribute.WA_StyledBackground, True)
-    dialog.setStyleSheet(APP_STYLESHEET)
+    apply_app_theme(dialog)
     dialog.setObjectName("dialogSurface")
 
 
+def add_resize_grip(shell_layout: QVBoxLayout, owner: QDialog) -> QSizeGrip:
+    row = make_transparent(QWidget(owner))
+    row_layout = QHBoxLayout(row)
+    row_layout.setContentsMargins(0, 0, 10, 8)
+    row_layout.setSpacing(0)
+    row_layout.addStretch(1)
+    grip = QSizeGrip(row)
+    grip.setObjectName("resizeGrip")
+    grip.setToolTip("拖动调整窗口大小")
+    grip.setCursor(Qt.CursorShape.SizeFDiagCursor)
+    grip.setFixedSize(22, 22)
+    row_layout.addWidget(grip, 0, Qt.AlignmentFlag.AlignRight | Qt.AlignmentFlag.AlignBottom)
+    shell_layout.addWidget(row, 0)
+    return grip
+
+
 def prepare_modern_menu(menu: QMenu) -> QMenu:
-    menu.setStyleSheet(APP_STYLESHEET)
+    apply_app_theme(menu)
     menu.setAttribute(Qt.WidgetAttribute.WA_StyledBackground, True)
     menu.setAttribute(Qt.WidgetAttribute.WA_TranslucentBackground, True)
     menu.setWindowFlag(Qt.WindowType.NoDropShadowWindowHint, True)
@@ -510,7 +172,7 @@ class DialogTitleBar(QFrame):
         caption = styled_label(title, "windowCaption")
         layout.addWidget(caption)
         layout.addStretch(1)
-        close_button = QPushButton("x")
+        close_button = QPushButton("×")
         mark_button(close_button, "titleCloseButton")
         close_button.clicked.connect(owner.reject)
         layout.addWidget(close_button)
@@ -884,6 +546,7 @@ class SettingsDialog(QDialog):
         shell_layout.addWidget(title_bar("设置", self))
         shell_layout.addLayout(main, 1)
         shell_layout.addWidget(bottom_container, 0)
+        self.resize_grip = add_resize_grip(shell_layout, self)
 
         layout = QVBoxLayout(self)
         layout.setContentsMargins(10, 10, 10, 10)
@@ -992,25 +655,40 @@ class ChatDialog(QDialog):
         super().__init__(parent)
         self.setWindowTitle(f"问{APP_NAME}")
         setup_modern_dialog(self)
-        self.resize(840, 680)
-        self.setMinimumSize(700, 480)
+        self.resize(1120, 740)
+        self.setMinimumSize(820, 540)
         self.context_removed = False
         self.context_check: QCheckBox | None = None
         self.context_chip: QFrame | None = None
         self.waiting_for_reply = False
+        self.session_rail_visible = True
+        self.tool_rail_visible = True
+        self.session_rail: QFrame | None = None
+        self.tool_rail: QFrame | None = None
         self.active_session_id = active_session.session_id if active_session is not None else ""
+        self.all_sessions: list[ConversationSession] = []
         self.message_widgets: list[QWidget] = []
         self.control_plan_buttons: dict[str, tuple[QPushButton, QPushButton, QLabel]] = {}
 
-        self.status_label = styled_label("就绪", "mutedLabel")
+        self.status_label = styled_label("就绪", "statusPill")
         self.session_title_label = styled_label("新会话", "dialogTitle")
         self.session_meta_label = styled_label("", "mutedLabel")
         self.memory_label = styled_label("暂无会话记忆", "mutedLabel", True)
+        self.context_state_label = styled_label("未加载文件上下文", "mutedLabel", True)
+        self.chat_breadcrumb_label = styled_label(f"{APP_NAME} / 新会话", "breadcrumbLabel")
+        self.chat_run_label = styled_label("● 就绪", "liveMetric")
+        self.chat_metrics_label = styled_label("本地 · 0 条消息 · 工具需授权", "appMetric")
 
         self.session_list = QListWidget()
-        self.session_list.setMinimumWidth(210)
-        self.session_list.setMaximumWidth(250)
+        self.session_list.setObjectName("sessionList")
+        self.session_list.setMinimumWidth(188)
+        self.session_list.setMaximumWidth(204)
         self.session_list.itemSelectionChanged.connect(self.emit_selected_session)
+
+        self.session_search = QLineEdit()
+        self.session_search.setObjectName("sessionSearch")
+        self.session_search.setPlaceholderText("搜索会话")
+        self.session_search.textChanged.connect(lambda _text="": self.render_sessions(self.active_session_id))
 
         new_button = QPushButton("新会话")
         mark_button(new_button, "primaryButton")
@@ -1022,8 +700,8 @@ class ChatDialog(QDialog):
 
         self.history_content = make_transparent(QWidget())
         self.history_layout = QVBoxLayout(self.history_content)
-        self.history_layout.setContentsMargins(12, 12, 12, 12)
-        self.history_layout.setSpacing(10)
+        self.history_layout.setContentsMargins(22, 20, 22, 20)
+        self.history_layout.setSpacing(16)
         self.history_layout.setAlignment(Qt.AlignmentFlag.AlignTop)
 
         self.history_scroll = transparent_scroll_area()
@@ -1032,9 +710,9 @@ class ChatDialog(QDialog):
 
         self.text_edit = QTextEdit()
         self.text_edit.setObjectName("chatInput")
-        self.text_edit.setPlaceholderText("输入问题、目标或文件处理需求")
-        self.text_edit.setMinimumHeight(82)
-        self.text_edit.setMaximumHeight(118)
+        self.text_edit.setPlaceholderText("告诉桌宠你的目标、卡点，或输入 / 命令调用工具")
+        self.text_edit.setMinimumHeight(78)
+        self.text_edit.setMaximumHeight(132)
 
         send_button = QPushButton("发送")
         mark_button(send_button, "primaryButton")
@@ -1045,22 +723,51 @@ class ChatDialog(QDialog):
         mark_button(dialog_close_button, "secondaryButton")
         dialog_close_button.clicked.connect(self.reject)
 
+        self.session_toggle_button = QPushButton("隐藏会话")
+        mark_button(self.session_toggle_button, "railToggleButton")
+        self.session_toggle_button.setToolTip("折叠或展开左侧会话栏")
+        self.session_toggle_button.clicked.connect(self.toggle_session_rail)
+
+        self.tool_toggle_button = QPushButton("隐藏工具")
+        mark_button(self.tool_toggle_button, "railToggleButton")
+        self.tool_toggle_button.setToolTip("折叠或展开右侧工具栏")
+        self.tool_toggle_button.clicked.connect(self.toggle_tool_rail)
+
         panel = QFrame()
-        panel.setObjectName("glassPanel")
+        panel.setObjectName("chatSurface")
         panel_layout = QVBoxLayout(panel)
-        panel_layout.setContentsMargins(16, 15, 16, 16)
+        panel_layout.setContentsMargins(0, 0, 0, 0)
         panel_layout.setSpacing(12)
+
+        app_bar = QFrame()
+        app_bar.setObjectName("chatAppBar")
+        app_bar_layout = QHBoxLayout(app_bar)
+        app_bar_layout.setContentsMargins(14, 9, 14, 9)
+        app_bar_layout.setSpacing(12)
+        app_bar_layout.addWidget(self.session_toggle_button, 0)
+        app_bar_layout.addWidget(self.chat_breadcrumb_label, 1)
+        app_bar_layout.addWidget(self.chat_run_label)
+        app_bar_layout.addWidget(self.chat_metrics_label)
+        app_bar_layout.addWidget(self.tool_toggle_button, 0)
+        panel_layout.addWidget(app_bar, 0)
 
         body = QHBoxLayout()
         body.setContentsMargins(0, 0, 0, 0)
-        body.setSpacing(12)
+        body.setSpacing(0)
 
         rail = QFrame()
-        rail.setObjectName("sessionRail")
+        rail.setObjectName("chatSessionRail")
         rail_layout = QVBoxLayout(rail)
-        rail_layout.setContentsMargins(10, 10, 10, 10)
+        rail_layout.setContentsMargins(14, 14, 12, 14)
         rail_layout.setSpacing(10)
-        rail_layout.addWidget(styled_label("会话", "railTitle"))
+        rail_header = QHBoxLayout()
+        rail_header.setContentsMargins(0, 0, 0, 0)
+        rail_header.setSpacing(8)
+        rail_header.addWidget(styled_label("会话", "railTitle"), 1)
+        rail_header.addWidget(styled_label("local", "chatMeta"))
+        rail_layout.addLayout(rail_header)
+        rail_layout.addWidget(styled_label("当前 / 最近", "railSectionTitle"))
+        rail_layout.addWidget(self.session_search)
         rail_layout.addWidget(self.session_list, 1)
         rail_buttons = QHBoxLayout()
         rail_buttons.setContentsMargins(0, 0, 0, 0)
@@ -1068,17 +775,22 @@ class ChatDialog(QDialog):
         rail_buttons.addWidget(new_button)
         rail_buttons.addWidget(clear_button)
         rail_layout.addLayout(rail_buttons)
+        rail.setMaximumWidth(232)
+        self.session_rail = rail
         body.addWidget(rail, 0)
 
+        center = QFrame()
+        center.setObjectName("conversationCanvas")
         conversation = QVBoxLayout()
-        conversation.setContentsMargins(0, 0, 0, 0)
+        center.setLayout(conversation)
+        conversation.setContentsMargins(16, 14, 16, 14)
         conversation.setSpacing(12)
 
         header = QFrame()
-        header.setObjectName("conversationHeader")
+        header.setObjectName("chatHeader")
         header_layout = QVBoxLayout(header)
-        header_layout.setContentsMargins(12, 10, 12, 10)
-        header_layout.setSpacing(5)
+        header_layout.setContentsMargins(14, 12, 14, 12)
+        header_layout.setSpacing(8)
         title_row = QHBoxLayout()
         title_row.setContentsMargins(0, 0, 0, 0)
         title_row.setSpacing(10)
@@ -1090,12 +802,22 @@ class ChatDialog(QDialog):
         title_row.addLayout(title_box, 1)
         title_row.addWidget(self.status_label)
         header_layout.addLayout(title_row)
+        info_row = QHBoxLayout()
+        info_row.setContentsMargins(0, 0, 0, 0)
+        info_row.setSpacing(8)
         memory_strip = QFrame()
         memory_strip.setObjectName("memoryStrip")
         memory_layout = QVBoxLayout(memory_strip)
         memory_layout.setContentsMargins(10, 7, 10, 7)
         memory_layout.addWidget(self.memory_label)
-        header_layout.addWidget(memory_strip)
+        info_row.addWidget(memory_strip, 1)
+        context_strip = QFrame()
+        context_strip.setObjectName("memoryStrip")
+        context_layout = QVBoxLayout(context_strip)
+        context_layout.setContentsMargins(10, 7, 10, 7)
+        context_layout.addWidget(self.context_state_label)
+        info_row.addWidget(context_strip, 1)
+        header_layout.addLayout(info_row)
         conversation.addWidget(header, 0)
 
         transcript = QFrame()
@@ -1109,8 +831,8 @@ class ChatDialog(QDialog):
         composer = QFrame()
         composer.setObjectName("chatComposer")
         composer_layout = QVBoxLayout(composer)
-        composer_layout.setContentsMargins(12, 12, 12, 12)
-        composer_layout.setSpacing(10)
+        composer_layout.setContentsMargins(12, 10, 12, 12)
+        composer_layout.setSpacing(8)
         if context_hint:
             self.context_chip = QFrame()
             self.context_chip.setObjectName("contextChip")
@@ -1121,23 +843,78 @@ class ChatDialog(QDialog):
             self.context_check.setChecked(True)
             chip_layout.addWidget(self.context_check)
             chip_layout.addWidget(styled_label(context_hint, "mutedLabel", True), 1)
-            chip_close_button = QPushButton("x")
+            chip_close_button = QPushButton("×")
             mark_button(chip_close_button, "chipCloseButton")
             chip_close_button.clicked.connect(self.remove_drop_context)
             chip_layout.addWidget(chip_close_button)
             composer_layout.addWidget(self.context_chip)
+            self.context_state_label.setText(context_hint)
         composer_layout.addWidget(self.text_edit)
 
         composer_buttons = QHBoxLayout()
         composer_buttons.setContentsMargins(0, 0, 0, 0)
-        composer_buttons.setSpacing(10)
+        composer_buttons.setSpacing(8)
+        composer_buttons.addWidget(self.make_composer_chip("记忆随配置", "使用设置里的 Memory 开关决定是否带会话上下文。"))
+        composer_buttons.addWidget(self.make_composer_chip("工具需授权", "写入、打开、运行命令会先生成授权卡。"))
+        composer_buttons.addWidget(self.make_tool_button("/pwd", "/pwd", "插入查看当前目录命令。"))
         composer_buttons.addStretch(1)
         composer_buttons.addWidget(dialog_close_button)
         composer_buttons.addWidget(send_button)
         composer_layout.addLayout(composer_buttons)
         conversation.addWidget(composer, 0)
 
-        body.addLayout(conversation, 1)
+        body.addWidget(center, 1)
+
+        tool_rail = QFrame()
+        tool_rail.setObjectName("toolRail")
+        tool_rail.setFixedWidth(202)
+        tool_rail_layout = QVBoxLayout(tool_rail)
+        tool_rail_layout.setContentsMargins(0, 0, 0, 0)
+        tool_rail_layout.setSpacing(0)
+
+        tool_content = make_transparent(QWidget())
+        tool_layout = QVBoxLayout(tool_content)
+        tool_layout.setContentsMargins(12, 14, 14, 14)
+        tool_layout.setSpacing(12)
+        tool_layout.addWidget(styled_label("工具", "railTitle"))
+        tool_layout.addWidget(styled_label("常用命令会插入输入框；需要风险确认的动作会在会话里生成授权卡。", "mutedLabel", True))
+
+        quick_group = QFrame()
+        quick_group.setObjectName("toolGroup")
+        quick_layout = QVBoxLayout(quick_group)
+        quick_layout.setContentsMargins(10, 10, 10, 10)
+        quick_layout.setSpacing(8)
+        for label, template, tooltip in (
+            ("系统状态", "/sys", "查看当前运行环境。"),
+            ("当前目录", "/pwd", "查看默认工作目录。"),
+            ("列出文件", "/ls ", "列出指定目录。"),
+            ("读取文件", "/read ", "读取一个文件。"),
+            ("搜索内容", "/search  ", "在路径中搜索关键词。"),
+        ):
+            quick_layout.addWidget(self.make_tool_button(label, template, tooltip))
+        tool_layout.addWidget(quick_group)
+
+        action_group = QFrame()
+        action_group.setObjectName("toolGroup")
+        action_layout = QVBoxLayout(action_group)
+        action_layout.setContentsMargins(10, 10, 10, 10)
+        action_layout.setSpacing(8)
+        action_layout.addWidget(styled_label("授权动作", "sectionTitle"))
+        for label, template, tooltip in (
+            ("打开路径", "/open ", "打开文件、目录或 URL，需要确认。"),
+            ("运行命令", "/run ", "运行外部命令，需要确认。"),
+            ("写入文件", "/write  :: ", "写入文件内容，需要确认。"),
+        ):
+            action_layout.addWidget(self.make_tool_button(label, template, tooltip))
+        tool_layout.addWidget(action_group)
+        tool_layout.addWidget(styled_label("对话中直接描述目标也可以触发同一套授权流程。", "mutedLabel", True))
+        tool_layout.addStretch(1)
+        tool_scroll = transparent_scroll_area()
+        tool_scroll.setWidgetResizable(True)
+        tool_scroll.setWidget(tool_content)
+        tool_rail_layout.addWidget(tool_scroll, 1)
+        self.tool_rail = tool_rail
+        body.addWidget(tool_rail, 0)
         panel_layout.addLayout(body, 1)
 
         shell = QFrame()
@@ -1150,7 +927,8 @@ class ChatDialog(QDialog):
         content_layout = QVBoxLayout(content_wrap)
         content_layout.setContentsMargins(14, 14, 14, 14)
         content_layout.addWidget(panel)
-        shell_layout.addWidget(content_wrap)
+        shell_layout.addWidget(content_wrap, 1)
+        self.resize_grip = add_resize_grip(shell_layout, self)
 
         layout = QVBoxLayout(self)
         layout.setContentsMargins(10, 10, 10, 10)
@@ -1162,17 +940,88 @@ class ChatDialog(QDialog):
     def text(self) -> str:
         return self.text_edit.toPlainText().strip()
 
+    def make_composer_chip(self, text: str, tooltip: str) -> QLabel:
+        label = styled_label(text, "composerChip")
+        label.setToolTip(tooltip)
+        return label
+
+    def make_tool_button(self, label: str, template: str, tooltip: str) -> QPushButton:
+        button = QPushButton(label)
+        mark_button(button, "toolChipButton")
+        button.setToolTip(tooltip)
+        button.clicked.connect(lambda _checked=False, value=template: self.insert_command_template(value))
+        return button
+
+    def insert_command_template(self, template: str) -> None:
+        existing = self.text_edit.toPlainText()
+        separator = "\n" if existing and not existing.endswith("\n") else ""
+        self.text_edit.setPlainText(f"{existing}{separator}{template}")
+        cursor = self.text_edit.textCursor()
+        cursor.movePosition(QTextCursor.MoveOperation.End)
+        self.text_edit.setTextCursor(cursor)
+        self.text_edit.setFocus(Qt.FocusReason.OtherFocusReason)
+
+    def toggle_session_rail(self) -> None:
+        self.session_rail_visible = not self.session_rail_visible
+        if self.session_rail is not None:
+            self.session_rail.setVisible(self.session_rail_visible)
+        self.session_toggle_button.setText("隐藏会话" if self.session_rail_visible else "显示会话")
+
+    def toggle_tool_rail(self) -> None:
+        self.tool_rail_visible = not self.tool_rail_visible
+        if self.tool_rail is not None:
+            self.tool_rail.setVisible(self.tool_rail_visible)
+        self.tool_toggle_button.setText("隐藏工具" if self.tool_rail_visible else "显示工具")
+
     def set_sessions(self, sessions: list[ConversationSession], active_session_id: str) -> None:
+        self.all_sessions = list(sessions)
+        self.render_sessions(active_session_id)
+
+    def add_session_section(self, title: str) -> None:
+        item = QListWidgetItem(title)
+        item.setData(Qt.ItemDataRole.UserRole, "")
+        item.setFlags(Qt.ItemFlag.NoItemFlags)
+        font = item.font()
+        font.setPointSize(10)
+        font.setBold(True)
+        item.setFont(font)
+        item.setForeground(QBrush(QColor("#8f8f8f")))
+        self.session_list.addItem(item)
+
+    def add_session_item(self, session: ConversationSession, active_session_id: str) -> None:
+        title = session.title or "新会话"
+        meta = f"{format_session_time(session.updated_at)} · {session.message_count} 条"
+        item = QListWidgetItem(f"{title}\n{meta}")
+        item.setData(Qt.ItemDataRole.UserRole, session.session_id)
+        self.session_list.addItem(item)
+        if session.session_id == active_session_id:
+            self.session_list.setCurrentItem(item)
+
+    def render_sessions(self, active_session_id: str) -> None:
         self.session_list.blockSignals(True)
         self.session_list.clear()
-        for session in sessions:
+        query = self.session_search.text().strip().lower() if hasattr(self, "session_search") else ""
+        visible_sessions: list[ConversationSession] = []
+        for session in self.all_sessions:
             title = session.title or "新会话"
             meta = f"{format_session_time(session.updated_at)} · {session.message_count} 条"
-            item = QListWidgetItem(f"{title}\n{meta}")
-            item.setData(Qt.ItemDataRole.UserRole, session.session_id)
-            self.session_list.addItem(item)
-            if session.session_id == active_session_id:
-                self.session_list.setCurrentItem(item)
+            summary = " ".join(session.memory_items[-2:]) if session.memory_items else session.summary
+            haystack = f"{title} {meta} {summary}".lower()
+            if query and query not in haystack:
+                continue
+            visible_sessions.append(session)
+        active_sessions = [session for session in visible_sessions if session.session_id == active_session_id]
+        recent_sessions = [session for session in visible_sessions if session.session_id != active_session_id]
+        if active_sessions:
+            self.add_session_section("当前会话")
+            for session in active_sessions:
+                self.add_session_item(session, active_session_id)
+        if recent_sessions:
+            self.add_session_section("最近会话")
+            for session in recent_sessions:
+                self.add_session_item(session, active_session_id)
+        if not visible_sessions:
+            self.add_session_section("无匹配会话")
         self.session_list.blockSignals(False)
 
     def set_active_session(
@@ -1182,10 +1031,13 @@ class ChatDialog(QDialog):
     ) -> None:
         if session is not None:
             self.active_session_id = session.session_id
-            self.session_title_label.setText(session.title or "新会话")
+            title = session.title or "新会话"
+            self.session_title_label.setText(title)
             self.session_meta_label.setText(
                 f"{format_session_time(session.updated_at)} · {session.message_count} 条消息"
             )
+            self.chat_breadcrumb_label.setText(f"{APP_NAME} / {compact_text(title, 48)}")
+            self.chat_metrics_label.setText(f"本地 · {session.message_count} 条消息 · 工具需授权")
             if session.memory_items:
                 preview = " · ".join(session.memory_items[-2:])
                 self.memory_label.setText(f"记忆 {len(session.memory_items)} 条：{preview}")
@@ -1198,6 +1050,8 @@ class ChatDialog(QDialog):
             self.session_title_label.setText("新会话")
             self.session_meta_label.setText("")
             self.memory_label.setText("暂无会话记忆")
+            self.chat_breadcrumb_label.setText(f"{APP_NAME} / 新会话")
+            self.chat_metrics_label.setText("本地 · 0 条消息 · 工具需授权")
         if messages is not None:
             self.set_history(messages)
 
@@ -1227,9 +1081,17 @@ class ChatDialog(QDialog):
         self.message_widgets = []
 
     def add_empty_state(self) -> None:
-        empty = styled_label("暂无会话", "mutedLabel")
-        empty.setAlignment(Qt.AlignmentFlag.AlignCenter)
-        empty.setMinimumHeight(180)
+        empty = QFrame()
+        empty.setObjectName("emptyState")
+        empty_layout = QVBoxLayout(empty)
+        empty_layout.setContentsMargins(22, 24, 22, 24)
+        empty_layout.setSpacing(8)
+        title = styled_label("开始和桌宠导师对话", "dialogTitle")
+        title.setAlignment(Qt.AlignmentFlag.AlignCenter)
+        subtitle = styled_label("描述目标、卡点或拖入文件；工具调用会在需要时请求授权。", "mutedLabel", True)
+        subtitle.setAlignment(Qt.AlignmentFlag.AlignCenter)
+        empty_layout.addWidget(title)
+        empty_layout.addWidget(subtitle)
         self.history_layout.addWidget(empty)
         self.message_widgets = [empty]
 
@@ -1237,10 +1099,21 @@ class ChatDialog(QDialog):
         if len(self.message_widgets) != 1:
             return
         widget = self.message_widgets[0]
-        if isinstance(widget, QLabel) and widget.text() == "暂无会话":
+        if widget.objectName() == "emptyState":
             self.history_layout.removeWidget(widget)
             widget.deleteLater()
             self.message_widgets = []
+
+    def assistant_avatar(self) -> QFrame:
+        avatar = QFrame()
+        avatar.setObjectName("assistantAvatar")
+        avatar.setFixedSize(30, 30)
+        layout = QVBoxLayout(avatar)
+        layout.setContentsMargins(0, 0, 0, 0)
+        label = styled_label("宠", "avatarText")
+        label.setAlignment(Qt.AlignmentFlag.AlignCenter)
+        layout.addWidget(label)
+        return avatar
 
     def add_message(self, role: str, content: str, ts: int | None = None) -> None:
         text = str(content or "").strip()
@@ -1252,16 +1125,16 @@ class ChatDialog(QDialog):
         row = make_transparent(QWidget())
         row_layout = QHBoxLayout(row)
         row_layout.setContentsMargins(0, 0, 0, 0)
-        row_layout.setSpacing(8)
+        row_layout.setSpacing(10)
 
         bubble = QFrame()
         bubble.setObjectName("chatBubbleUser" if role == "user" else "chatBubbleAssistant")
-        bubble.setMaximumWidth(520)
+        bubble.setMaximumWidth(610 if role == "assistant" else 560)
         bubble_layout = QVBoxLayout(bubble)
-        bubble_layout.setContentsMargins(12, 10, 12, 10)
-        bubble_layout.setSpacing(5)
+        bubble_layout.setContentsMargins(14, 11, 14, 11)
+        bubble_layout.setSpacing(7)
 
-        role_label = styled_label("你" if role == "user" else APP_NAME, "chatRole")
+        role_label = styled_label("你" if role == "user" else f"{APP_NAME} · 桌宠导师", "chatRole")
         message_label = styled_label(text, "chatText", True)
         message_label.setTextInteractionFlags(Qt.TextInteractionFlag.TextSelectableByMouse)
         meta_label = styled_label(self.format_message_time(ts), "chatMeta")
@@ -1273,7 +1146,8 @@ class ChatDialog(QDialog):
             row_layout.addStretch(1)
             row_layout.addWidget(bubble, 0)
         else:
-            row_layout.addWidget(bubble, 0)
+            row_layout.addWidget(self.assistant_avatar(), 0, Qt.AlignmentFlag.AlignTop)
+            row_layout.addWidget(bubble, 1)
             row_layout.addStretch(1)
         self.history_layout.addWidget(row)
         self.message_widgets.append(row)
@@ -1290,44 +1164,64 @@ class ChatDialog(QDialog):
         row = make_transparent(QWidget())
         row_layout = QHBoxLayout(row)
         row_layout.setContentsMargins(0, 0, 0, 0)
-        row_layout.setSpacing(8)
+        row_layout.setSpacing(10)
 
         card = QFrame()
         card.setObjectName("controlPlan")
-        card.setMaximumWidth(560)
+        card.setMaximumWidth(660)
         card_layout = QVBoxLayout(card)
-        card_layout.setContentsMargins(12, 10, 12, 10)
-        card_layout.setSpacing(8)
-        card_layout.addWidget(styled_label(f"授权请求 · {title}" if requires_confirmation else title, "chatRole"))
+        card_layout.setContentsMargins(14, 12, 14, 12)
+        card_layout.setSpacing(9)
+        header = QHBoxLayout()
+        header.setContentsMargins(0, 0, 0, 0)
+        header.setSpacing(8)
+        header.addWidget(styled_label("工具调用", "chatRole"))
+        header.addStretch(1)
+        header.addWidget(styled_label("等待授权" if requires_confirmation else "只读执行", "statusPill"))
+        card_layout.addLayout(header)
+        card_layout.addWidget(styled_label(title, "sectionTitle"))
         if requires_confirmation:
             card_layout.addWidget(styled_label("请确认目标和内容，授权前不会执行。", "chatMeta"))
-        detail_label = styled_label(details, "chatText", True)
-        detail_label.setTextInteractionFlags(Qt.TextInteractionFlag.TextSelectableByMouse)
-        card_layout.addWidget(detail_label)
+        card_layout.addWidget(self.make_tool_detail_panel(details))
         status_label = styled_label("等待你的授权" if requires_confirmation else "准备执行", "chatMeta")
         card_layout.addWidget(status_label)
 
         if requires_confirmation:
-            buttons = QHBoxLayout()
+            footer = QFrame()
+            footer.setObjectName("permissionFooter")
+            buttons = QHBoxLayout(footer)
             buttons.setContentsMargins(0, 0, 0, 0)
             buttons.setSpacing(8)
-            run_button = QPushButton("授权执行")
-            cancel_button = QPushButton("取消")
+            run_button = QPushButton("允许本次")
+            cancel_button = QPushButton("拒绝")
             mark_button(run_button, "primaryButton")
             mark_button(cancel_button, "secondaryButton")
             run_button.clicked.connect(lambda _checked=False, target=plan_id: self.approve_control_plan(target))
             cancel_button.clicked.connect(lambda _checked=False, target=plan_id: self.cancel_control_plan(target))
+            buttons.addWidget(styled_label("需要授权", "chatMeta"))
             buttons.addStretch(1)
             buttons.addWidget(cancel_button)
             buttons.addWidget(run_button)
-            card_layout.addLayout(buttons)
+            card_layout.addWidget(footer)
             self.control_plan_buttons[plan_id] = (run_button, cancel_button, status_label)
 
+        row_layout.addWidget(self.assistant_avatar(), 0, Qt.AlignmentFlag.AlignTop)
         row_layout.addWidget(card, 0)
         row_layout.addStretch(1)
         self.history_layout.addWidget(row)
         self.message_widgets.append(row)
         self.scroll_to_bottom()
+
+    def make_tool_detail_panel(self, details: str) -> QFrame:
+        panel = QFrame()
+        panel.setObjectName("toolDetailPanel")
+        layout = QVBoxLayout(panel)
+        layout.setContentsMargins(11, 9, 11, 9)
+        layout.setSpacing(0)
+        detail_label = styled_label(details, "toolDetailText", True)
+        detail_label.setTextInteractionFlags(Qt.TextInteractionFlag.TextSelectableByMouse)
+        layout.addWidget(detail_label)
+        return panel
 
     def approve_control_plan(self, plan_id: str) -> None:
         self.set_control_plan_status(plan_id, "已授权，执行中", enabled=False)
@@ -1362,6 +1256,7 @@ class ChatDialog(QDialog):
         self.waiting_for_reply = waiting
         self.send_button.setEnabled(not waiting)
         self.status_label.setText("导师正在思考" if waiting else "就绪")
+        self.chat_run_label.setText("● 思考中" if waiting else "● 就绪")
 
     def submit_message(self) -> None:
         if self.waiting_for_reply:
@@ -1387,6 +1282,7 @@ class ChatDialog(QDialog):
         self.context_removed = True
         if self.context_chip is not None:
             self.context_chip.hide()
+        self.context_state_label.setText("文件上下文已移除")
 
     def showEvent(self, event) -> None:  # type: ignore[override]
         super().showEvent(event)
@@ -1429,7 +1325,8 @@ class TextViewDialog(QDialog):
         content_layout = QVBoxLayout(content_wrap)
         content_layout.setContentsMargins(14, 14, 14, 14)
         content_layout.addWidget(panel)
-        shell_layout.addWidget(content_wrap)
+        shell_layout.addWidget(content_wrap, 1)
+        self.resize_grip = add_resize_grip(shell_layout, self)
 
         layout = QVBoxLayout(self)
         layout.setContentsMargins(10, 10, 10, 10)
@@ -1522,7 +1419,8 @@ class TodoDialog(QDialog):
         content_layout = QVBoxLayout(content_wrap)
         content_layout.setContentsMargins(14, 14, 14, 14)
         content_layout.addWidget(panel)
-        shell_layout.addWidget(content_wrap)
+        shell_layout.addWidget(content_wrap, 1)
+        self.resize_grip = add_resize_grip(shell_layout, self)
 
         layout = QVBoxLayout(self)
         layout.setContentsMargins(10, 10, 10, 10)

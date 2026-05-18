@@ -7,7 +7,7 @@ import time
 from pathlib import Path
 
 from PySide6.QtCore import QObject, QPoint, QPointF, QRect, QRectF, QTimer, Qt, QEvent, Signal
-from PySide6.QtGui import QAction, QColor, QFont, QGuiApplication, QIcon, QImage, QMouseEvent, QPainter, QPainterPath, QPen, QPixmap, QFontMetrics
+from PySide6.QtGui import QAction, QColor, QContextMenuEvent, QFont, QGuiApplication, QIcon, QImage, QMouseEvent, QPainter, QPainterPath, QPen, QPixmap, QFontMetrics
 from PySide6.QtWidgets import QApplication, QDialog, QMenu, QWidget
 
 from ..agent_client import append_memory_turn, call_agent, compact_text
@@ -160,6 +160,18 @@ def as_local_pos(widget: QWidget, event_or_point: object) -> QPoint:
     return widget.mapFromGlobal(as_global_pos(widget, event_or_point))
 
 
+def as_context_menu_pos(widget: QWidget, event_or_point: object) -> QPoint:
+    getter = getattr(event_or_point, "globalPos", None)
+    if getter is not None:
+        try:
+            value = getter()
+            if isinstance(value, QPoint):
+                return value
+        except Exception:
+            pass
+    return as_global_pos(widget, event_or_point)
+
+
 class DesktopMentorPet(QWidget):
     def __init__(self, image_path: Path, message: str, size: int) -> None:
         super().__init__(
@@ -200,6 +212,7 @@ class DesktopMentorPet(QWidget):
         self.icon_error = self.refresh_window_icon()
 
         self.dragging = False
+        self.native_drag_active = False
         self.drag_offset = QPoint()
         self.drag_start = QPoint()
         self.last_drag_pos = QPoint()
@@ -217,6 +230,8 @@ class DesktopMentorPet(QWidget):
         self.drop_hover = False
         self.drop_effect_until = 0.0
         self.drag_effect_until = 0.0
+        self.context_menu_active = False
+        self.last_context_menu_closed_at = 0.0
         self.pulse_until = 0.0
         self.message_until = 0.0
         self.last_interaction = time.monotonic()
@@ -734,11 +749,13 @@ class DesktopMentorPet(QWidget):
     def begin_drag(self, global_pos: QPoint, *, touch: bool = False) -> None:
         self.mark_interaction()
         self.dragging = True
+        self.native_drag_active = False
         self.touch_dragging = touch
         self.drag_start = global_pos
         self.last_drag_pos = global_pos
         self.drag_offset = global_pos - self.frameGeometry().topLeft()
         self.raise_()
+        self.native_drag_active = self.try_start_system_move()
         self.drag_effect_until = time.monotonic() + DRAG_RELEASE_EFFECT_DURATION
         self.setCursor(Qt.CursorShape.ClosedHandCursor)
         self.start_visual_effect(DRAG_RELEASE_EFFECT_DURATION)
@@ -755,17 +772,32 @@ class DesktopMentorPet(QWidget):
         if touch and not self.drag_follow_timer.isActive():
             self.drag_follow_timer.start()
 
+    def try_start_system_move(self) -> bool:
+        if not QGuiApplication.platformName().lower().startswith("wayland"):
+            return False
+        handle = self.windowHandle()
+        if handle is None:
+            return False
+        try:
+            return bool(handle.startSystemMove())
+        except Exception:
+            return False
+
     def move_from_pointer(self, global_pos: QPoint) -> None:
         if self.touch_dragging and self.touch_menu_timer.isActive():
             delta = global_pos - self.touch_start_pos
             if abs(delta.x()) + abs(delta.y()) > 10:
                 self.touch_menu_timer.stop()
         self.last_drag_pos = global_pos
+        if self.native_drag_active:
+            return
         self.move(global_pos - self.drag_offset)
 
     def follow_drag_pointer(self) -> None:
         if not self.dragging or not self.touch_dragging:
             self.drag_follow_timer.stop()
+            return
+        if self.native_drag_active:
             return
         pointer = self.last_drag_pos
         if not pointer.isNull():
@@ -773,6 +805,7 @@ class DesktopMentorPet(QWidget):
 
     def end_drag(self) -> None:
         self.dragging = False
+        self.native_drag_active = False
         self.touch_dragging = False
         self.drag_follow_timer.stop()
         self.touch_menu_timer.stop()
@@ -1054,7 +1087,16 @@ class DesktopMentorPet(QWidget):
             self.end_drag()
             event.accept()
             return
+        if event.button() == Qt.MouseButton.RightButton:
+            self.open_menu(as_global_pos(self, event))
+            event.accept()
+            return
         super().mouseReleaseEvent(event)
+
+    def contextMenuEvent(self, event: QContextMenuEvent) -> None:  # type: ignore[override]
+        self.mark_interaction()
+        self.open_menu(as_context_menu_pos(self, event))
+        event.accept()
 
     def enterEvent(self, _event) -> None:  # type: ignore[override]
         self.hovering = True
@@ -1068,6 +1110,11 @@ class DesktopMentorPet(QWidget):
 
     def event(self, event) -> bool:  # type: ignore[override]
         event_type = event.type()
+        if event_type == QEvent.Type.ContextMenu:
+            self.mark_interaction()
+            self.open_menu(as_context_menu_pos(self, event))
+            event.accept()
+            return True
         if event_type in {
             QEvent.Type.TouchBegin,
             QEvent.Type.TouchUpdate,
@@ -1142,6 +1189,10 @@ class DesktopMentorPet(QWidget):
         return super().event(event)
 
     def open_menu(self, pos: QPoint) -> None:
+        now = time.monotonic()
+        if self.context_menu_active or now - self.last_context_menu_closed_at < 0.2:
+            return
+        self.context_menu_active = True
         menu = prepare_modern_menu(QMenu(self))
         chat = QAction("对话", self)
         todo_action = QAction("待办", self)
@@ -1177,11 +1228,16 @@ class DesktopMentorPet(QWidget):
         menu.addAction(smaller)
         menu.addSeparator()
         menu.addAction(reset)
-        menu.exec(pos)
+        try:
+            menu.exec(pos)
+        finally:
+            self.context_menu_active = False
+            self.last_context_menu_closed_at = time.monotonic()
 
     def open_settings(self) -> None:
         self.mark_interaction()
         dialog = SettingsDialog(self.config, self)
+        self.position_dialog_near_pet(dialog)
         if dialog.exec() == QDialog.DialogCode.Accepted:
             old_config = self.config
             old_config_path = self.config_path
@@ -1449,7 +1505,7 @@ class DesktopMentorPet(QWidget):
         self.show_bubble("文件上下文已清除。", duration=self.message_duration())
 
     def position_dialog_near_pet(self, dialog: QDialog) -> None:
-        if not isinstance(dialog, ChatDialog):
+        if not isinstance(dialog, (ChatDialog, SettingsDialog)):
             dialog.adjustSize()
         size = dialog.size()
         screen = QGuiApplication.screenAt(self.sticker_center_global()) or QGuiApplication.primaryScreen()

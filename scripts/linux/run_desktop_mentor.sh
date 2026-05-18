@@ -27,6 +27,47 @@ die() {
   exit 1
 }
 
+ensure_xauthority() {
+  if [[ -n "${XAUTHORITY:-}" ]]; then
+    return 0
+  fi
+  for auth_file in /run/user/1000/.mutter-Xwaylandauth.*; do
+    if [[ -f "$auth_file" ]]; then
+      export XAUTHORITY="$auth_file"
+      break
+    fi
+  done
+}
+
+qt_platform_can_start() {
+  local platform="$1"
+  QT_QPA_PLATFORM="$platform" "$PYTHON_BIN" - <<'PY' >/dev/null 2>&1
+from PySide6.QtWidgets import QApplication
+
+app = QApplication([])
+app.quit()
+PY
+}
+
+prefer_xcb_platform() {
+  ensure_xauthority
+  if [[ -z "${DISPLAY:-}" && -S /tmp/.X11-unix/X0 ]]; then
+    export DISPLAY=:0
+  elif [[ -z "${DISPLAY:-}" && -S /tmp/.X11-unix/X1 ]]; then
+    export DISPLAY=:1
+  fi
+
+  if [[ -z "${DISPLAY:-}" && ! -S /tmp/.X11-unix/X0 && ! -S /tmp/.X11-unix/X1 ]]; then
+    return 1
+  fi
+
+  if qt_platform_can_start xcb; then
+    export QT_QPA_PLATFORM=xcb
+    return 0
+  fi
+  return 1
+}
+
 PYTHON_BIN=""
 ATTEMPTED=()
 
@@ -84,24 +125,15 @@ if [[ -z "${PYTHON_BIN:-}" ]]; then
   exit 1
 fi
 
-if [[ -z "${QT_QPA_PLATFORM:-}" ]]; then
-  if [[ -z "${XAUTHORITY:-}" ]]; then
-    for auth_file in /run/user/1000/.mutter-Xwaylandauth.*; do
-      if [[ -f "$auth_file" ]]; then
-        export XAUTHORITY="$auth_file"
-        break
-      fi
-    done
+if [[ "${QT_QPA_PLATFORM:-}" == "wayland" && "${DESKTOP_MENTOR_ALLOW_WAYLAND:-0}" != "1" ]]; then
+  if ! prefer_xcb_platform; then
+    export QT_QPA_PLATFORM=wayland
   fi
+fi
 
-  if [[ -n "${DISPLAY:-}" ]]; then
-    export QT_QPA_PLATFORM=xcb
-  elif [[ -S /tmp/.X11-unix/X0 ]]; then
-    export DISPLAY=:0
-    export QT_QPA_PLATFORM=xcb
-  elif [[ -S /tmp/.X11-unix/X1 ]]; then
-    export DISPLAY=:1
-    export QT_QPA_PLATFORM=xcb
+if [[ -z "${QT_QPA_PLATFORM:-}" ]]; then
+  if prefer_xcb_platform; then
+    :
   elif [[ -S /run/user/1000/wayland-0 ]]; then
     export XDG_RUNTIME_DIR="${XDG_RUNTIME_DIR:-/run/user/1000}"
     export WAYLAND_DISPLAY="${WAYLAND_DISPLAY:-wayland-0}"
