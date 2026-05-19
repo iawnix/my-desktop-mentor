@@ -135,7 +135,7 @@ app = QApplication([])
 configure_linux_input_method_environment()
 settings = SettingsDialog(AgentConfig())
 default_config = new_default_config()
-assert all(len(paths) == 8 for paths in default_config.sticker_sets.values()), default_config.sticker_sets
+assert all(len(paths) == 16 for paths in default_config.sticker_sets.values()), default_config.sticker_sets
 assert len(default_config.sticker_sets) == 8, default_config.sticker_sets
 chat = ChatDialog()
 context_chat = ChatDialog(context_hint="文件上下文：README.md")
@@ -306,7 +306,7 @@ with tempfile.TemporaryDirectory() as sticker_tmp:
     assert len(discovered[STICKER_ACTION_TAP]) == 2, discovered
 bundled = discover_sticker_sets(DEFAULT_STICKERS_DIR)
 assert len(bundled) == 8, bundled
-assert all(len(paths) == 8 for paths in bundled.values()), bundled
+assert all(len(paths) == 16 for paths in bundled.values()), bundled
 assert chat.text() == ""
 assert context_chat.use_drop_context()
 context_chat.remove_drop_context()

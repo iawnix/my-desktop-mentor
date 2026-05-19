@@ -1,6 +1,7 @@
 """Transparent desktop pet widget."""
 from __future__ import annotations
 
+import json
 import math
 import threading
 import time
@@ -89,7 +90,7 @@ from .tokens import (
     WINDOW_PAD,
 )
 from ..drop_context import collect_drop_context, compose_prompt_with_drop_context
-from ..idle_detector import system_idle_seconds
+from ..idle_detector import idle_detection_diagnostics, system_idle_seconds
 from ..stickers import normalize_sticker_sets
 from ..todo_store import due_todos, future_todos, load_todos, remove_todos_by_ids, rescheduled_todo, save_todos
 from .dialogs import ChatDialog, FullScreenIdleAlert, SettingsDialog, TextViewDialog, TodoDialog, prepare_modern_menu
@@ -602,6 +603,15 @@ class DesktopMentorPet(QWidget):
             return
         self.show_bubble(message, duration=self.message_duration(), action=STICKER_ACTION_ALERT)
 
+    def open_idle_diagnostics(self) -> None:
+        self.mark_interaction()
+        report = idle_detection_diagnostics()
+        text = json.dumps(report, ensure_ascii=False, indent=2)
+        dialog = TextViewDialog("Idle 检测诊断", text)
+        self.position_dialog_near_pet(dialog)
+        dialog.activate_for_input()
+        dialog.exec()
+
     def clear_fullscreen_alert(self, alert: FullScreenIdleAlert) -> None:
         if self.fullscreen_alert is alert:
             self.fullscreen_alert = None
@@ -1050,7 +1060,6 @@ class DesktopMentorPet(QWidget):
             event.accept()
             return
         if event.button() == Qt.MouseButton.RightButton:
-            self.open_menu(as_global_pos(self, event))
             event.accept()
             return
         super().mousePressEvent(event)
@@ -1121,6 +1130,7 @@ class DesktopMentorPet(QWidget):
             event.accept()
             return
         if event.button() == Qt.MouseButton.RightButton:
+            self.mark_interaction()
             self.open_menu(as_global_pos(self, event))
             event.accept()
             return
@@ -1128,6 +1138,9 @@ class DesktopMentorPet(QWidget):
 
     def contextMenuEvent(self, event: QContextMenuEvent) -> None:  # type: ignore[override]
         self.mark_interaction()
+        if event.reason() == QContextMenuEvent.Reason.Mouse:
+            event.accept()
+            return
         self.open_menu(as_context_menu_pos(self, event))
         event.accept()
 
@@ -1143,11 +1156,6 @@ class DesktopMentorPet(QWidget):
 
     def event(self, event) -> bool:  # type: ignore[override]
         event_type = event.type()
-        if event_type == QEvent.Type.ContextMenu:
-            self.mark_interaction()
-            self.open_menu(as_context_menu_pos(self, event))
-            event.accept()
-            return True
         if event_type in {
             QEvent.Type.TouchBegin,
             QEvent.Type.TouchUpdate,
@@ -1230,6 +1238,7 @@ class DesktopMentorPet(QWidget):
         chat = QAction("对话", self)
         todo_action = QAction("待办", self)
         settings = QAction("设置", self)
+        idle_diag = QAction("Idle 诊断", self)
         quit_action = QAction("退出", self)
         ask_files = QAction("只问文件", self)
         show_files = QAction("文件摘要", self)
@@ -1240,6 +1249,7 @@ class DesktopMentorPet(QWidget):
         chat.triggered.connect(self.open_chat)
         todo_action.triggered.connect(self.open_todos)
         settings.triggered.connect(self.open_settings)
+        idle_diag.triggered.connect(self.open_idle_diagnostics)
         quit_action.triggered.connect(QApplication.quit)
         ask_files.triggered.connect(self.ask_about_dropped_files)
         show_files.triggered.connect(self.open_drop_summary)
@@ -1250,6 +1260,7 @@ class DesktopMentorPet(QWidget):
         menu.addAction(chat)
         menu.addAction(settings)
         menu.addAction(todo_action)
+        menu.addAction(idle_diag)
         menu.addAction(quit_action)
         if self.last_drop_context:
             menu.addSeparator()

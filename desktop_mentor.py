@@ -25,6 +25,7 @@ from desktop_mentor_app.assets import DEFAULT_IMAGE, convert_image_to_ico, ensur
 from desktop_mentor_app.config_store import chat_history_path, load_config, memory_path, save_config, todos_path
 from desktop_mentor_app.control.audit_log import audit_log_path
 from desktop_mentor_app.constants import APP_NAME, DEFAULT_CLICK_MESSAGE, DEFAULT_PET_SIZE
+from desktop_mentor_app.idle_detector import idle_detection_diagnostics
 from desktop_mentor_app.stickers import discover_sticker_sets, sticker_frame_counts
 from desktop_mentor_app.ui.theme import apply_app_theme
 from desktop_mentor_app.ui.pet_widget import DesktopMentorPet
@@ -124,7 +125,16 @@ def main(argv: list[str]) -> int:
     prefer_movable_linux_platform()
     configure_qt_input_method_runtime()
     if args.diagnose:
-        print(json.dumps({"input_method": input_method_diagnostics()}, ensure_ascii=False), file=sys.stderr)
+        print(
+            json.dumps(
+                {
+                    "input_method": input_method_diagnostics(),
+                    "idle_detection": idle_detection_diagnostics(),
+                },
+                ensure_ascii=False,
+            ),
+            file=sys.stderr,
+        )
     app = QApplication(sys.argv[:1])
     app.setQuitOnLastWindowClosed(False)
     app.setApplicationName(APP_NAME)
@@ -158,6 +168,7 @@ def main(argv: list[str]) -> int:
             "window_size": [pet.width(), pet.height()],
             "config_path": str(pet.config_path),
             "quit_on_last_window_closed": app.quitOnLastWindowClosed(),
+            "idle_detection": idle_detection_diagnostics(),
         }
         print(json.dumps(result, ensure_ascii=False))
         return 0
