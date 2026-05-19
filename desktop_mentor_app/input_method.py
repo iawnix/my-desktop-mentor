@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 import os
+import re
 import shutil
 import subprocess
 import sys
@@ -12,6 +13,8 @@ from pathlib import Path
 FCITX_PLUGIN_NAMES = (
     "libfcitx5platforminputcontextplugin.so",
     "libfcitxplatforminputcontextplugin.so",
+    "libfcitxplatforminputcontextplugin-qt6.so",
+    "libfcitx5platforminputcontextplugin-qt6.so",
 )
 
 KNOWN_QT_PLUGIN_ROOTS = (
@@ -48,6 +51,105 @@ def _dedupe_paths(paths: list[str]) -> list[str]:
             continue
         seen.add(path)
         result.append(path)
+    return result
+
+
+def _dedupe_files(paths: list[Path]) -> list[str]:
+    seen: set[str] = set()
+    result: list[str] = []
+    for path in paths:
+        try:
+            normalized = str(path.expanduser().resolve(strict=False))
+        except OSError:
+            normalized = str(path.expanduser())
+        if normalized in seen:
+            continue
+        seen.add(normalized)
+        result.append(normalized)
+    return result
+
+
+def _platform_input_context_files(plugin_root: str) -> list[str]:
+    context_dir = Path(plugin_root).expanduser() / "platforminputcontexts"
+    if not context_dir.is_dir():
+        return []
+    return _dedupe_files(sorted(path for path in context_dir.glob("*.so") if path.is_file()))
+
+
+def _fcitx_plugin_files_in_root(plugin_root: str) -> list[str]:
+    context_dir = Path(plugin_root).expanduser() / "platforminputcontexts"
+    if not context_dir.is_dir():
+        return []
+    return _dedupe_files([context_dir / name for name in FCITX_PLUGIN_NAMES if (context_dir / name).is_file()])
+
+
+def _qt_version_tuple(version: str) -> tuple[int, int, int] | None:
+    parts = version.split(".")
+    if len(parts) < 2:
+        return None
+    try:
+        major = int(parts[0])
+        minor = int(parts[1])
+        patch = int(parts[2]) if len(parts) > 2 else 0
+    except ValueError:
+        return None
+    return major, minor, patch
+
+
+def _plugin_qt_abi_versions(plugin_file: str) -> list[str]:
+    """Read Qt symbol versions from a plugin binary without loading it."""
+    path = Path(plugin_file)
+    if not path.is_file():
+        return []
+    commands = []
+    if shutil.which("strings"):
+        commands.append(["strings", "-a", str(path)])
+    if shutil.which("objdump"):
+        commands.append(["objdump", "-T", str(path)])
+    matches: set[tuple[int, int]] = set()
+    for command in commands:
+        try:
+            result = subprocess.run(
+                command,
+                check=False,
+                stdout=subprocess.PIPE,
+                stderr=subprocess.DEVNULL,
+                text=True,
+                timeout=1.5,
+            )
+        except Exception:
+            continue
+        for major, minor in re.findall(r"Qt_([0-9]+)\.([0-9]+)", result.stdout):
+            try:
+                matches.add((int(major), int(minor)))
+            except ValueError:
+                continue
+        if matches:
+            break
+    return [f"{major}.{minor}" for major, minor in sorted(matches)]
+
+
+def _plugin_compatibility(plugin_file: str, runtime_qt_version: str) -> dict[str, object]:
+    runtime = _qt_version_tuple(runtime_qt_version)
+    abi_versions = _plugin_qt_abi_versions(plugin_file)
+    result: dict[str, object] = {
+        "path": plugin_file,
+        "qt_abi_versions": abi_versions,
+        "compatible": None,
+        "exact_minor_match": False,
+    }
+    if runtime is None or not abi_versions:
+        return result
+    runtime_major, runtime_minor, _runtime_patch = runtime
+    parsed: list[tuple[int, int]] = []
+    for version in abi_versions:
+        major_minor = _qt_version_tuple(version)
+        if major_minor is not None:
+            parsed.append((major_minor[0], major_minor[1]))
+    if not parsed:
+        return result
+    result["exact_minor_match"] = any(major == runtime_major and minor == runtime_minor for major, minor in parsed)
+    result["compatible"] = all(major == runtime_major and minor <= runtime_minor for major, minor in parsed)
     return result
 
 
@@ -153,8 +255,7 @@ def fcitx_qt_plugin_roots() -> list[str]:
     candidates = [*_qtpaths_plugin_roots(), *KNOWN_QT_PLUGIN_ROOTS]
     for raw_root in candidates:
         root = Path(raw_root).expanduser()
-        context_dir = root / "platforminputcontexts"
-        if any((context_dir / name).is_file() for name in FCITX_PLUGIN_NAMES):
+        if _fcitx_plugin_files_in_root(str(root)):
             roots.append(str(root))
     return _dedupe_paths(roots)
 
@@ -162,12 +263,25 @@ def fcitx_qt_plugin_roots() -> list[str]:
 def fcitx_qt_plugin_files() -> list[str]:
     files: list[str] = []
     for root in fcitx_qt_plugin_roots():
-        context_dir = Path(root) / "platforminputcontexts"
-        for name in FCITX_PLUGIN_NAMES:
-            path = context_dir / name
-            if path.is_file():
-                files.append(str(path))
+        files.extend(_fcitx_plugin_files_in_root(root))
     return _dedupe_paths(files)
+
+
+def compatible_fcitx_qt_plugin_roots(runtime_qt_version: str) -> list[str]:
+    compatible: list[str] = []
+    unknown: list[str] = []
+    for root in fcitx_qt_plugin_roots():
+        root_files = _fcitx_plugin_files_in_root(root)
+        if not root_files:
+            continue
+        plugin_states = [_plugin_compatibility(path, runtime_qt_version).get("compatible") for path in root_files]
+        if any(state is True for state in plugin_states):
+            compatible.append(root)
+        elif any(state is None for state in plugin_states):
+            unknown.append(root)
+    if compatible:
+        return _dedupe_paths(compatible)
+    return _dedupe_paths(unknown)
 
 
 def configure_qt_input_method_runtime() -> list[str]:
@@ -177,11 +291,11 @@ def configure_qt_input_method_runtime() -> list[str]:
     if os.environ.get("QT_IM_MODULE", "").lower() not in {"fcitx", "fcitx5"}:
         return []
 
-    from PySide6.QtCore import QCoreApplication, QLibraryInfo
+    from PySide6.QtCore import QCoreApplication, QLibraryInfo, qVersion
 
     existing = list(QCoreApplication.libraryPaths())
     bundled = QLibraryInfo.path(QLibraryInfo.LibraryPath.PluginsPath)
-    roots = _dedupe_paths([*existing, bundled, *fcitx_qt_plugin_roots()])
+    roots = _dedupe_paths([*existing, bundled, *compatible_fcitx_qt_plugin_roots(qVersion())])
     if roots != existing:
         QCoreApplication.setLibraryPaths(roots)
     ensure_fcitx_running()
@@ -253,12 +367,23 @@ def input_method_diagnostics() -> dict[str, object]:
         import PySide6
         from PySide6.QtCore import QCoreApplication, QLibraryInfo, qVersion
 
+        qt_plugins_path = QLibraryInfo.path(QLibraryInfo.LibraryPath.PluginsPath)
+        qt_library_paths = list(QCoreApplication.libraryPaths())
+        fcitx_files = fcitx_qt_plugin_files()
+        bundled_fcitx = _fcitx_plugin_files_in_root(qt_plugins_path)
+        compatibility = [_plugin_compatibility(path, qVersion()) for path in fcitx_files]
         data.update(
             {
                 "PySide6": getattr(PySide6, "__version__", ""),
                 "Qt": qVersion(),
-                "qt_plugins_path": QLibraryInfo.path(QLibraryInfo.LibraryPath.PluginsPath),
-                "qt_library_paths": list(QCoreApplication.libraryPaths()),
+                "qt_plugins_path": qt_plugins_path,
+                "qt_platforminputcontext_files": _platform_input_context_files(qt_plugins_path),
+                "qt_bundled_fcitx_plugin_files": bundled_fcitx,
+                "fcitx_qt_plugin_roots": fcitx_qt_plugin_roots(),
+                "compatible_fcitx_qt_plugin_roots": compatible_fcitx_qt_plugin_roots(qVersion()),
+                "fcitx_plugin_compatibility": compatibility,
+                "fcitx_runtime_has_compatible_plugin": any(item.get("compatible") is True for item in compatibility),
+                "qt_library_paths": qt_library_paths,
             }
         )
     except Exception as exc:

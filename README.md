@@ -71,6 +71,21 @@ Exec=env QT_IM_MODULE=fcitx XMODIFIERS=@im=fcitx GTK_IM_MODULE=fcitx SDL_IM_MODU
 
 用户级 `.desktop` 通常在 `~/.local/share/applications/`；系统级启动器通常在 `/usr/share/applications/`，修改后可按桌面环境需要重新登录或刷新应用列表。
 
+如果你在 Conda/venv 里启动程序，提示符类似 `(python3.12)`，但系统 fcitx 仍然不能输入中文，优先使用启动脚本自动选择的系统 Python/Qt，或显式指定：
+
+```bash
+DESKTOP_MENTOR_PYTHON=/usr/bin/python3 ./scripts/linux/run_desktop_mentor.sh
+```
+
+原因是 pip/Conda 的 PySide6 可能自带一套 Qt 插件目录，和系统 fcitx Qt 插件不是同一套运行时；此时 `fcitx5-remote -n` 即使返回 `pinyin`，Qt 文本框也可能收不到中文提交。`--diagnose` 会额外打印：
+
+- `qt_platforminputcontext_files`：当前 PySide6/Qt 自带的输入法插件
+- `fcitx_qt_plugin_files`：系统里找到的 fcitx Qt 插件，兼容 Debian/Ubuntu 的 `libfcitx5platforminputcontextplugin.so` 和 Arch/Manjaro 常见的 `libfcitxplatforminputcontextplugin-qt6.so`
+- `compatible_fcitx_qt_plugin_roots`：实际会加入 Qt library paths 的兼容插件根目录，Qt5 或更高 Qt minor 的插件会被排除
+- `fcitx_plugin_compatibility`：插件二进制暴露的 Qt ABI 版本，以及它是否不高于当前 PySide6 的 Qt major/minor
+
+如果 `qt_platforminputcontext_files` 没有 fcitx，且 `fcitx_runtime_has_compatible_plugin` 是 `false`，问题就不是输入法引擎没启动，而是当前 PySide6 运行时缺少可加载的 fcitx Qt6 platform input context。公共处理方式是换用和系统 Qt/fcitx 插件匹配的 Python/PySide6 运行时，或安装当前发行版提供的 Qt6/fcitx 包；不要把不同 Qt minor 版本的 `.so` 直接复制进 Conda/venv。若必须使用当前环境，可设置 `DESKTOP_MENTOR_PREFER_SYSTEM_QT=0` 关闭系统 Qt 优先策略。
+
 直接用 Python 运行也可以，但需要当前 Python 能导入 `PySide6`：
 
 ```bash

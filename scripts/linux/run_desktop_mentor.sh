@@ -69,12 +69,14 @@ preferred_x11_display() {
 
 qt_platform_can_start() {
   local platform="$1"
-  QT_QPA_PLATFORM="$platform" "$PYTHON_BIN" - <<'PY' >/dev/null 2>&1
+  (
+    QT_QPA_PLATFORM="$platform" "$PYTHON_BIN" - <<'PY'
 from PySide6.QtWidgets import QApplication
 
 app = QApplication([])
 app.quit()
 PY
+  ) >/dev/null 2>&1
 }
 
 configure_input_method() {
@@ -149,14 +151,7 @@ add_candidate() {
   CANDIDATES+=("$candidate")
 }
 
-if [[ -n "${DESKTOP_MENTOR_PYTHON:-}" ]]; then
-  if python_can_run_app "$DESKTOP_MENTOR_PYTHON"; then
-    PYTHON_BIN="$DESKTOP_MENTOR_PYTHON"
-  else
-    die "DESKTOP_MENTOR_PYTHON cannot import PySide6.QtCore: $DESKTOP_MENTOR_PYTHON"
-  fi
-else
-  CANDIDATES=()
+add_standard_python_candidates() {
   add_candidate "$ROOT_DIR/.venv/bin/python"
   if [[ -n "${CONDA_PREFIX:-}" ]]; then
     add_candidate "$CONDA_PREFIX/bin/python"
@@ -170,6 +165,39 @@ else
   for candidate in "$HOME"/soft/conda/*/bin/python3 "$HOME"/miniconda*/bin/python "$HOME"/anaconda*/bin/python; do
     add_candidate "$candidate"
   done
+}
+
+add_system_qt_python_candidates() {
+  add_candidate /usr/bin/python3
+  add_candidate /usr/local/bin/python3
+  add_candidate /usr/bin/python
+  add_candidate /usr/local/bin/python
+}
+
+prefer_system_qt_python() {
+  if [[ "${DESKTOP_MENTOR_PREFER_SYSTEM_QT:-1}" == "0" ]]; then
+    return 1
+  fi
+  if [[ "${DESKTOP_MENTOR_IM_MODULE:-}" == "none" || "${DESKTOP_MENTOR_IM_MODULE:-}" == "off" ]]; then
+    return 1
+  fi
+  [[ "${DESKTOP_MENTOR_IM_MODULE:-}" == fcitx* || "${QT_IM_MODULE:-}" == fcitx* || "${XMODIFIERS:-}" == *@im=fcitx* || -x /usr/bin/fcitx5 || -x /usr/local/bin/fcitx5 ]]
+}
+
+if [[ -n "${DESKTOP_MENTOR_PYTHON:-}" ]]; then
+  if python_can_run_app "$DESKTOP_MENTOR_PYTHON"; then
+    PYTHON_BIN="$DESKTOP_MENTOR_PYTHON"
+  else
+    die "DESKTOP_MENTOR_PYTHON cannot import PySide6.QtCore: $DESKTOP_MENTOR_PYTHON"
+  fi
+else
+  CANDIDATES=()
+  if prefer_system_qt_python; then
+    add_system_qt_python_candidates
+    add_standard_python_candidates
+  else
+    add_standard_python_candidates
+  fi
 
   for candidate in "${CANDIDATES[@]}"; do
     if python_can_run_app "$candidate"; then
@@ -242,6 +270,12 @@ try:
     diag = input_method_diagnostics()
     print(f"[desktop-mentor] fcitx5_remote: {diag.get('fcitx5_remote', '')}", file=sys.stderr)
     print(f"[desktop-mentor] fcitx_qt_plugin_files: {diag.get('fcitx_qt_plugin_files', [])}", file=sys.stderr)
+    print(f"[desktop-mentor] qt_plugins_path: {diag.get('qt_plugins_path', '')}", file=sys.stderr)
+    print(f"[desktop-mentor] qt_platforminputcontext_files: {diag.get('qt_platforminputcontext_files', [])}", file=sys.stderr)
+    print(f"[desktop-mentor] qt_bundled_fcitx_plugin_files: {diag.get('qt_bundled_fcitx_plugin_files', [])}", file=sys.stderr)
+    print(f"[desktop-mentor] compatible_fcitx_qt_plugin_roots: {diag.get('compatible_fcitx_qt_plugin_roots', [])}", file=sys.stderr)
+    print(f"[desktop-mentor] fcitx_plugin_compatibility: {diag.get('fcitx_plugin_compatibility', [])}", file=sys.stderr)
+    print(f"[desktop-mentor] fcitx_runtime_has_compatible_plugin: {diag.get('fcitx_runtime_has_compatible_plugin', False)}", file=sys.stderr)
     print(f"[desktop-mentor] qt_library_paths: {diag.get('qt_library_paths', [])}", file=sys.stderr)
 except Exception as exc:
     print(f"[desktop-mentor] input method diagnostics unavailable: {type(exc).__name__}: {exc}", file=sys.stderr)

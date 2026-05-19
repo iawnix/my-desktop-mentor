@@ -20,6 +20,10 @@ fi
 PYTHON_FOR_QT="${DESKTOP_MENTOR_PYTHON:-}"
 if [[ -z "$PYTHON_FOR_QT" ]]; then
   CANDIDATES=()
+  if [[ "${DESKTOP_MENTOR_PREFER_SYSTEM_QT:-1}" != "0" ]] && command -v fcitx5 >/dev/null 2>&1; then
+    [[ -x /usr/bin/python3 ]] && CANDIDATES+=("/usr/bin/python3")
+    [[ -x /usr/local/bin/python3 ]] && CANDIDATES+=("/usr/local/bin/python3")
+  fi
   [[ -x "$ROOT_DIR/.venv/bin/python" ]] && CANDIDATES+=("$ROOT_DIR/.venv/bin/python")
   [[ -n "${CONDA_PREFIX:-}" && -x "$CONDA_PREFIX/bin/python" ]] && CANDIDATES+=("$CONDA_PREFIX/bin/python")
   command -v python3 >/dev/null 2>&1 && CANDIDATES+=("$(command -v python3)")
@@ -111,7 +115,7 @@ from desktop_mentor_app.control.tool_registry import desktop_path
 from desktop_mentor_app.conversation_store import append_chat_turn, build_conversation_memory_context, clear_chat_history, create_conversation_session, load_chat_history, list_conversation_sessions
 from desktop_mentor_app.constants import DEFAULT_CLICK_MESSAGE, MAX_IDLE_SECONDS, MAX_PET_SIZE, MIN_PET_SIZE, STICKER_ACTION_IDLE, STICKER_ACTION_TAP
 from desktop_mentor_app.drop_context import DROP_CONTEXT_PROMPT_HEADER, collect_drop_context, compose_prompt_with_drop_context
-from desktop_mentor_app.input_method import configure_linux_input_method_environment, fcitx_qt_plugin_files, preferred_x11_display
+from desktop_mentor_app.input_method import configure_linux_input_method_environment, fcitx_qt_plugin_files, input_method_diagnostics, preferred_x11_display
 from desktop_mentor_app.stickers import discover_sticker_sets
 from desktop_mentor_app.todo_store import load_todos, save_todos
 from desktop_mentor_app.ui.dialogs import ChatDialog, SettingsDialog, TodoDialog, prepare_modern_menu
@@ -193,6 +197,11 @@ assert chat.windowType() != Qt.WindowType.Tool
 assert menu.testAttribute(Qt.WidgetAttribute.WA_TranslucentBackground)
 assert isinstance(preferred_x11_display(), str)
 assert isinstance(fcitx_qt_plugin_files(), list)
+im_diag = input_method_diagnostics()
+assert isinstance(im_diag.get("qt_platforminputcontext_files", []), list)
+assert isinstance(im_diag.get("qt_bundled_fcitx_plugin_files", []), list)
+assert isinstance(im_diag.get("compatible_fcitx_qt_plugin_roots", []), list)
+assert isinstance(im_diag.get("fcitx_plugin_compatibility", []), list)
 settings.scroll_to_section(2)
 assert any(button.text() == "互动" and button.objectName() == "railNavButtonActive" for button in nav_buttons)
 assert settings.sticker_editor.to_sticker_sets() == {}
