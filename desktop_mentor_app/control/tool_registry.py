@@ -305,11 +305,46 @@ def build_natural_language_read_plan(text: str, workspace: Path) -> ControlPlan 
     )
 
 
-def build_natural_language_plan(text: str, workspace: Path) -> ControlPlan | None:
-    read_plan = build_natural_language_read_plan(text, workspace)
-    if read_plan is not None:
-        return read_plan
+def build_natural_language_list_plan(text: str, workspace: Path) -> ControlPlan | None:
+    normalized = " ".join(text.split())
+    lowered = normalized.lower()
+    wants_file_change = any(keyword in normalized for keyword in ("创建", "新建", "生成", "写入", "写上", "保存"))
+    if wants_file_change:
+        return None
 
+    mentions_desktop = "桌面" in normalized or "desktop" in lowered
+    mentions_file_list = (
+        "文件列表" in normalized
+        or "目录列表" in normalized
+        or "列文件" in normalized
+        or "列桌面" in normalized
+        or "列出文件" in normalized
+        or "列一下" in normalized
+        or "列出" in normalized
+        or "看看有哪些" in normalized
+        or "有哪些文件" in normalized
+        or "list files" in lowered
+        or "list desktop" in lowered
+    )
+    if not (mentions_desktop and mentions_file_list):
+        return None
+
+    target = desktop_path()
+    permission, reason = can_read_path(target)
+    if permission == PermissionLevel.BLOCKED:
+        return blocked_plan(text, "列出桌面文件被阻止", reason, [f"目标目录：{target}"])
+    return ControlPlan(
+        new_plan_id(),
+        text,
+        "list_dir",
+        "列出桌面文件",
+        [f"目标目录：{target}", "执行后会把桌面文件列表显示在会话里。"],
+        {"path": str(target), "workspace": str(workspace)},
+        PermissionLevel.USER_APPROVAL,
+    )
+
+
+def build_natural_language_write_plan(text: str, workspace: Path) -> ControlPlan | None:
     normalized = " ".join(text.split())
     lowered = normalized.lower()
     mentions_desktop = "桌面" in normalized or "desktop" in lowered
@@ -340,6 +375,21 @@ def build_natural_language_plan(text: str, workspace: Path) -> ControlPlan | Non
         {"path": str(target), "content": content},
         PermissionLevel.USER_APPROVAL,
     )
+
+
+NATURAL_LANGUAGE_PLAN_BUILDERS = (
+    build_natural_language_read_plan,
+    build_natural_language_list_plan,
+    build_natural_language_write_plan,
+)
+
+
+def build_natural_language_plan(text: str, workspace: Path) -> ControlPlan | None:
+    for builder in NATURAL_LANGUAGE_PLAN_BUILDERS:
+        plan = builder(text, workspace)
+        if plan is not None:
+            return plan
+    return None
 
 
 def blocked_plan(source_text: str, title: str, reason: str, steps: list[str] | None = None) -> ControlPlan:

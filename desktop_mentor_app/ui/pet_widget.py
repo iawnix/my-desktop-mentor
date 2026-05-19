@@ -1413,21 +1413,25 @@ class DesktopMentorPet(QWidget):
             self.fetch_control_reply(plan, user_prompt, session_id)
             return
         if plan.requires_confirmation:
-            self.pending_control_plans[plan.plan_id] = (plan, user_prompt, session_id)
-            if self.chat_dialog is not None:
-                self.chat_dialog.add_control_plan(plan.plan_id, plan.title, plan.summary(), True)
-                self.chat_dialog.set_waiting(False)
-            try:
-                append_chat_turn(user_prompt, plan.summary() + "\n\n等待用户确认。", session_id)
-            except Exception:
-                pass
-            self.refresh_chat_dialog_sessions()
-            self.show_bubble("电脑操作需要确认。", duration=self.message_duration(), action=STICKER_ACTION_THINKING)
+            self.request_control_authorization(plan, user_prompt, session_id)
             return
         self.show_bubble("执行本地只读操作。", duration=min(1.8, self.message_duration()), action=STICKER_ACTION_THINKING)
         self.play_action(STICKER_ACTION_THINKING, loop=True)
         thread = threading.Thread(target=self.fetch_control_reply, args=(plan, user_prompt, session_id), daemon=True)
         thread.start()
+
+    def request_control_authorization(self, plan: ControlPlan, user_prompt: str, session_id: str) -> None:
+        """Queue any user-approval control plan behind the same chat authorization card."""
+        self.pending_control_plans[plan.plan_id] = (plan, user_prompt, session_id)
+        if self.chat_dialog is not None:
+            self.chat_dialog.add_control_plan(plan.plan_id, plan.title, plan.summary(), True)
+            self.chat_dialog.set_waiting(False)
+        try:
+            append_chat_turn(user_prompt, plan.summary() + "\n\n等待用户确认。", session_id)
+        except Exception:
+            pass
+        self.refresh_chat_dialog_sessions()
+        self.show_bubble("电脑操作需要确认。", duration=self.message_duration(), action=STICKER_ACTION_THINKING)
 
     def approve_control_plan(self, plan_id: str) -> None:
         pending = self.pending_control_plans.pop(plan_id, None)

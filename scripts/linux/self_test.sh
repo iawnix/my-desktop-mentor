@@ -241,6 +241,20 @@ pet.chat_dialog = ChatDialog(sessions=list_conversation_sessions(), active_sessi
 pet.chat_dialog.set_waiting(True)
 pet.show_agent_reply("切换前请求的异步返回", switched_session.session_id)
 assert not pet.chat_dialog.waiting_for_reply
+auth_session = create_conversation_session("授权接口测试")
+pet.chat_dialog = ChatDialog(sessions=list_conversation_sessions(), active_session=auth_session, history=[])
+for auth_text in (
+    "/open https://example.com",
+    "/write authorized-output.txt :: hello",
+    f"/run --cwd {shlex.quote(str(ROOT))} {shlex.quote(sys.executable)} -c \"print('authorization')\"",
+):
+    auth_plan = build_control_plan(auth_text, str(ROOT))
+    assert auth_plan is not None and auth_plan.requires_confirmation, auth_plan
+    pet.request_control_authorization(auth_plan, auth_text, auth_session.session_id)
+    assert auth_plan.plan_id in pet.pending_control_plans
+    assert auth_plan.plan_id in pet.chat_dialog.control_plan_buttons
+    assert not pet.chat_dialog.waiting_for_reply
+    pet.pending_control_plans.pop(auth_plan.plan_id, None)
 pet.chat_dialog = None
 assert len(history) == 2, history
 assert len(history_chat.message_widgets) == 2, len(history_chat.message_widgets)
@@ -336,6 +350,16 @@ with tempfile.TemporaryDirectory() as tmp:
     assert Path(str(nl_read_plan.args["path"])) == configured_desktop.resolve(strict=False) / "Nature_manuscript.txt"
     nl_read_result = execute_control_plan(nl_read_plan)
     assert nl_read_result.ok and "draft abstract" in nl_read_result.output
+    nl_list_plan = build_control_plan("请列出桌面文件", str(control_root))
+    assert nl_list_plan is not None and nl_list_plan.requires_confirmation
+    assert nl_list_plan.action == "list_dir", nl_list_plan
+    assert Path(str(nl_list_plan.args["path"])) == configured_desktop.resolve(strict=False)
+    nl_list_result = execute_control_plan(nl_list_plan)
+    assert nl_list_result.ok and "Nature_manuscript.txt" in nl_list_result.output
+    copied_no_card_text = "可以，但我这边没弹出 Computer control 的文件读取确认卡，先检查一下设置里是否开启了电脑控制权限。 开启后我就能帮你列桌面文件；大家抓紧交任务！服务器很空了！"
+    copied_no_card_plan = build_control_plan(copied_no_card_text, str(control_root))
+    assert copied_no_card_plan is not None and copied_no_card_plan.requires_confirmation
+    assert copied_no_card_plan.action == "list_dir", copied_no_card_plan
     explicit_path_plan = build_control_plan(r"这个路径明确了：`D:\DATA\Desktop\Nature_manuscript.txt`", str(control_root))
     assert explicit_path_plan is not None and explicit_path_plan.requires_confirmation
     assert explicit_path_plan.action == "read_file", explicit_path_plan
