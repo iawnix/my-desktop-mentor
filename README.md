@@ -59,6 +59,8 @@ cd my-desktop-mentor
 
 在 GNOME/Wayland 桌面下，启动脚本会优先探测可用的 XWayland/xcb 后端，因为普通 Qt 顶层窗口在 Wayland 下不能总是可靠执行程序式移动；如果 xcb 不可用，会回退到 Wayland 并使用 Qt 原生系统移动接口作为拖动兜底。右键菜单同时兼容鼠标右键和系统上下文菜单事件。
 
+Linux 中文输入法：启动脚本会在检测到 fcitx5 时为 Qt 设置 `QT_IM_MODULE=fcitx`、`XMODIFIERS=@im=fcitx`、`GTK_IM_MODULE=fcitx`，降低 PySide6 输入框偶发无法切换中文的问题。如果你的桌面使用其他输入法框架，可以用 `DESKTOP_MENTOR_IM_MODULE=ibus` 指定，或用 `DESKTOP_MENTOR_IM_MODULE=none` 完全关闭自动设置。`--diagnose` 会打印当前输入法相关环境变量。
+
 直接用 Python 运行也可以，但需要当前 Python 能导入 `PySide6`：
 
 ```bash

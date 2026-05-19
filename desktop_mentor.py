@@ -5,6 +5,7 @@ from __future__ import annotations
 import argparse
 import json
 import os
+import shutil
 import subprocess
 import sys
 from pathlib import Path
@@ -33,6 +34,32 @@ def parse_args(argv: list[str]) -> argparse.Namespace:
     parser.add_argument("--force-icon", action="store_true", help="regenerate ICO even when the target is newer")
     parser.add_argument("--load-sticker-dir", type=Path, help="load action sticker frames from a directory with idle/tap/drag/... subfolders")
     return parser.parse_args(argv)
+
+
+def configure_linux_input_method() -> None:
+    if not sys.platform.startswith("linux"):
+        return
+    requested = os.environ.get("DESKTOP_MENTOR_IM_MODULE", "").strip().lower()
+    if requested in {"none", "off"}:
+        return
+    module = requested
+    if not module:
+        qt_im = os.environ.get("QT_IM_MODULE", "")
+        xmodifiers = os.environ.get("XMODIFIERS", "")
+        if qt_im.startswith("fcitx") or "@im=fcitx" in xmodifiers:
+            module = "fcitx"
+        elif shutil.which("fcitx5") is not None:
+            module = "fcitx"
+    if module in {"fcitx", "fcitx5"}:
+        if not os.environ.get("QT_IM_MODULE") or os.environ.get("QT_IM_MODULE") == "fcitx5":
+            os.environ["QT_IM_MODULE"] = "fcitx"
+        if not os.environ.get("XMODIFIERS") or os.environ.get("XMODIFIERS") == "@im=fcitx5":
+            os.environ["XMODIFIERS"] = "@im=fcitx"
+        os.environ.setdefault("GTK_IM_MODULE", "fcitx")
+        os.environ.setdefault("SDL_IM_MODULE", "fcitx")
+        os.environ.setdefault("GLFW_IM_MODULE", "ibus")
+    elif module:
+        os.environ.setdefault("QT_IM_MODULE", module)
 
 
 def prefer_movable_linux_platform() -> None:
@@ -110,6 +137,7 @@ def main(argv: list[str]) -> int:
         )
         return 0
 
+    configure_linux_input_method()
     prefer_movable_linux_platform()
     app = QApplication(sys.argv[:1])
     app.setApplicationName(APP_NAME)

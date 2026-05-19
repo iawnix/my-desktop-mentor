@@ -49,6 +49,35 @@ app.quit()
 PY
 }
 
+configure_input_method() {
+  if [[ "${DESKTOP_MENTOR_IM_MODULE:-}" == "none" || "${DESKTOP_MENTOR_IM_MODULE:-}" == "off" ]]; then
+    return 0
+  fi
+
+  local module="${DESKTOP_MENTOR_IM_MODULE:-}"
+  if [[ -z "$module" ]]; then
+    if [[ "${QT_IM_MODULE:-}" == fcitx* || "${XMODIFIERS:-}" == *@im=fcitx* ]]; then
+      module="fcitx"
+    elif command -v fcitx5 >/dev/null 2>&1 || pgrep -x fcitx5 >/dev/null 2>&1; then
+      module="fcitx"
+    fi
+  fi
+
+  if [[ "$module" == "fcitx" || "$module" == "fcitx5" ]]; then
+    if [[ -z "${QT_IM_MODULE:-}" || "${QT_IM_MODULE:-}" == "fcitx5" ]]; then
+      export QT_IM_MODULE=fcitx
+    fi
+    if [[ -z "${XMODIFIERS:-}" || "${XMODIFIERS:-}" == "@im=fcitx5" ]]; then
+      export XMODIFIERS=@im=fcitx
+    fi
+    export GTK_IM_MODULE="${GTK_IM_MODULE:-fcitx}"
+    export SDL_IM_MODULE="${SDL_IM_MODULE:-fcitx}"
+    export GLFW_IM_MODULE="${GLFW_IM_MODULE:-ibus}"
+  elif [[ -n "$module" ]]; then
+    export QT_IM_MODULE="${QT_IM_MODULE:-$module}"
+  fi
+}
+
 prefer_xcb_platform() {
   ensure_xauthority
   if [[ -z "${DISPLAY:-}" && -S /tmp/.X11-unix/X0 ]]; then
@@ -125,6 +154,8 @@ if [[ -z "${PYTHON_BIN:-}" ]]; then
   exit 1
 fi
 
+configure_input_method
+
 if [[ "${QT_QPA_PLATFORM:-}" == "wayland" && "${DESKTOP_MENTOR_ALLOW_WAYLAND:-0}" != "1" ]]; then
   if ! prefer_xcb_platform; then
     export QT_QPA_PLATFORM=wayland
@@ -165,6 +196,9 @@ print(f"[desktop-mentor] DISPLAY: {os.environ.get('DISPLAY', '')}", file=sys.std
 print(f"[desktop-mentor] WAYLAND_DISPLAY: {os.environ.get('WAYLAND_DISPLAY', '')}", file=sys.stderr)
 print(f"[desktop-mentor] XDG_RUNTIME_DIR: {os.environ.get('XDG_RUNTIME_DIR', '')}", file=sys.stderr)
 print(f"[desktop-mentor] XAUTHORITY: {os.environ.get('XAUTHORITY', '')}", file=sys.stderr)
+print(f"[desktop-mentor] QT_IM_MODULE: {os.environ.get('QT_IM_MODULE', '')}", file=sys.stderr)
+print(f"[desktop-mentor] XMODIFIERS: {os.environ.get('XMODIFIERS', '')}", file=sys.stderr)
+print(f"[desktop-mentor] GTK_IM_MODULE: {os.environ.get('GTK_IM_MODULE', '')}", file=sys.stderr)
 PY
 fi
 
