@@ -120,7 +120,7 @@ from desktop_mentor_app import config_store
 from desktop_mentor_app.agent_client import agent_system_prompt
 from desktop_mentor_app.assets import DEFAULT_IMAGE, DEFAULT_STICKERS_DIR, ROOT
 from desktop_mentor_app.config_store import AgentConfig, new_default_config
-from desktop_mentor_app.control import PermissionLevel, build_control_plan, execute_control_plan
+from desktop_mentor_app.control import PermissionLevel, build_control_plan, build_control_plan_from_agent_reply, execute_control_plan
 from desktop_mentor_app.control.tool_registry import desktop_path
 from desktop_mentor_app.conversation_store import append_chat_turn, build_conversation_memory_context, clear_chat_history, create_conversation_session, load_chat_history, list_conversation_sessions
 from desktop_mentor_app.constants import DEFAULT_CLICK_MESSAGE, MAX_IDLE_SECONDS, MAX_PET_SIZE, MIN_PET_SIZE, STICKER_ACTION_IDLE, STICKER_ACTION_TAP
@@ -221,10 +221,15 @@ chat.add_control_plan("plan-1", "测试计划", "1. 读取状态", True)
 chat.approve_control_plan("plan-1")
 assert approvals == ["plan-1"], approvals
 submissions = []
-chat.message_submitted.connect(lambda text, use_context, session_id: submissions.append((text, use_context, session_id)))
+chat.conversation_context_check.setChecked(False)
+chat.message_submitted.connect(
+    lambda text, use_drop_context, session_id, use_conversation_context: submissions.append(
+        (text, use_drop_context, session_id, use_conversation_context)
+    )
+)
 chat.text_edit.setPlainText("新的问题")
 chat.submit_message()
-assert submissions == [("新的问题", False, "")], submissions
+assert submissions == [("新的问题", False, "", False)], submissions
 assert chat.waiting_for_reply
 chat.add_assistant_message("新的回答")
 chat.set_waiting(False)
@@ -235,6 +240,18 @@ assert pet.chat_dialog.parent() is None
 assert pet.chat_dialog.testAttribute(Qt.WidgetAttribute.WA_InputMethodEnabled)
 assert pet.chat_dialog.windowType() != Qt.WindowType.Tool
 pet.chat_dialog.close()
+pet.chat_dialog = None
+old_session = append_chat_turn("旧会话问题", "旧会话回答")
+pet.chat_dialog = ChatDialog(
+    sessions=list_conversation_sessions(),
+    active_session=old_session,
+    history=load_chat_history(old_session.session_id),
+)
+isolated_session = pet.session_for_context_policy("不带上下文的新问题", old_session.session_id, False)
+assert isolated_session.session_id != old_session.session_id, (isolated_session, old_session)
+assert isolated_session.message_count == 0, isolated_session
+pet.show_user_message_for_session("不带上下文的新问题", isolated_session.session_id)
+assert pet.chat_dialog.active_session_id == isolated_session.session_id
 pet.chat_dialog = None
 switched_session = create_conversation_session("切换后的会话")
 pet.chat_dialog = ChatDialog(sessions=list_conversation_sessions(), active_session=managed_session, history=[])
@@ -255,6 +272,24 @@ for auth_text in (
     assert auth_plan.plan_id in pet.chat_dialog.control_plan_buttons
     assert not pet.chat_dialog.waiting_for_reply
     pet.pending_control_plans.pop(auth_plan.plan_id, None)
+agent_plan, cleaned_reply = build_control_plan_from_agent_reply(
+    "我需要先读取这个文件。\nCONTROL_REQUEST: 读取 D:\\DATA\\Desktop\\Nature_manuscript.txt",
+    str(ROOT),
+)
+assert agent_plan is not None and agent_plan.requires_confirmation, agent_plan
+assert agent_plan.action == "read_file", agent_plan
+assert cleaned_reply == "我需要先读取这个文件。", cleaned_reply
+pet.show_agent_control_request(agent_plan, cleaned_reply, "帮我看 Nature 文件", auth_session.session_id)
+assert agent_plan.plan_id in pet.pending_control_plans
+assert agent_plan.plan_id in pet.chat_dialog.control_plan_buttons
+pet.pending_control_plans.pop(agent_plan.plan_id, None)
+hint_plan, hint_cleaned_reply = build_control_plan_from_agent_reply(
+    "我会通过内置电脑控制去读它：D:\\DATA\\Desktop\\Nature_manuscript.txt",
+    str(ROOT),
+)
+assert hint_plan is not None and hint_plan.requires_confirmation, hint_plan
+assert hint_plan.action == "read_file", hint_plan
+assert hint_cleaned_reply.startswith("我会通过内置电脑控制"), hint_cleaned_reply
 pet.chat_dialog = None
 assert len(history) == 2, history
 assert len(history_chat.message_widgets) == 2, len(history_chat.message_widgets)

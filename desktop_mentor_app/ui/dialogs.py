@@ -428,7 +428,7 @@ class SettingsDialog(QDialog):
         idle_mode_index = self.idle_mode_combo.findData(config.idle_mode or DEFAULT_IDLE_MODE)
         self.idle_mode_combo.setCurrentIndex(max(0, idle_mode_index))
 
-        self.memory_check = QCheckBox("保留最近对话作为上下文")
+        self.memory_check = QCheckBox("默认携带当前会话上下文")
         self.memory_check.setChecked(bool(config.memory_enabled))
 
         self.memory_turns_spin = QSpinBox()
@@ -474,8 +474,8 @@ class SettingsDialog(QDialog):
         interaction_form.addRow("Idle mode", self.idle_mode_combo)
 
         memory_form = modern_form_layout()
-        memory_form.addRow("Memory", self.memory_check)
-        memory_form.addRow("Memory depth", self.memory_turns_spin)
+        memory_form.addRow("模型上下文", self.memory_check)
+        memory_form.addRow("上下文轮数", self.memory_turns_spin)
 
         control_form = modern_form_layout()
         control_form.addRow("Computer control", self.control_check)
@@ -496,7 +496,7 @@ class SettingsDialog(QDialog):
             section_card("运行", runtime_form),
             section_card("互动", interaction_form),
             section_card("动作贴纸", sticker_layout, "这些素材只写入用户运行时配置，不复制进项目目录。"),
-            section_card("记忆", memory_form),
+            section_card("上下文", memory_form),
             section_card("电脑控制", control_form, "读操作直接执行；运行、打开和写入会先请求确认。"),
             section_card("风格提示词", prompt_layout),
         ]
@@ -529,7 +529,7 @@ class SettingsDialog(QDialog):
         rail_layout.setSpacing(10)
         rail_layout.addWidget(styled_label(APP_NAME, "railTitle", True))
         rail_layout.addSpacing(6)
-        for index, item_text in enumerate(("接口", "运行", "互动", "贴纸", "记忆", "电脑", "风格")):
+        for index, item_text in enumerate(("接口", "运行", "互动", "贴纸", "上下文", "电脑", "风格")):
             nav = QPushButton(item_text)
             nav.setObjectName("railNavButtonActive" if index == 0 else "railNavButton")
             nav.setCursor(Qt.CursorShape.PointingHandCursor)
@@ -539,7 +539,7 @@ class SettingsDialog(QDialog):
         rail_layout.addStretch(1)
         rail_layout.addWidget(styled_label("runtime local", "mutedLabel"))
 
-        subtitle = styled_label("接口、形象、提醒、记忆与话术集中配置。", "dialogSubtitle", True)
+        subtitle = styled_label("接口、形象、提醒、模型上下文与话术集中配置。", "dialogSubtitle", True)
 
         content = make_transparent(QWidget())
         self.settings_content = content
@@ -672,7 +672,7 @@ class SettingsDialog(QDialog):
 
 
 class ChatDialog(QDialog):
-    message_submitted = Signal(str, bool, str)
+    message_submitted = Signal(str, bool, str, bool)
     control_plan_approved = Signal(str)
     control_plan_cancelled = Signal(str)
     session_selected = Signal(str)
@@ -686,6 +686,7 @@ class ChatDialog(QDialog):
         sessions: list[ConversationSession] | None = None,
         active_session: ConversationSession | None = None,
         history: list[ChatHistoryMessage] | None = None,
+        use_conversation_context: bool = False,
     ) -> None:
         super().__init__(parent)
         self.setWindowTitle(f"问{APP_NAME}")
@@ -695,6 +696,11 @@ class ChatDialog(QDialog):
         self.context_removed = False
         self.context_check: QCheckBox | None = None
         self.context_chip: QFrame | None = None
+        self.conversation_context_check = QCheckBox("使用当前会话上下文")
+        self.conversation_context_check.setChecked(use_conversation_context)
+        self.conversation_context_check.setToolTip(
+            "只影响发送给模型的上下文，不影响本地会话历史。关闭后本次输入会进入新的独立会话。"
+        )
         self.waiting_for_reply = False
         self.session_rail_visible = False
         self.tool_rail_visible = False
@@ -842,6 +848,7 @@ class ChatDialog(QDialog):
         composer_buttons = QHBoxLayout()
         composer_buttons.setContentsMargins(0, 0, 0, 0)
         composer_buttons.setSpacing(8)
+        composer_buttons.addWidget(self.conversation_context_check)
         composer_buttons.addStretch(1)
         composer_buttons.addWidget(send_button)
         composer_layout.addLayout(composer_buttons)
@@ -1215,15 +1222,22 @@ class ChatDialog(QDialog):
         if not user_text:
             return
         self.text_edit.clear()
-        self.add_user_message(user_text)
         self.set_waiting(True)
-        self.message_submitted.emit(user_text, self.use_drop_context(), self.active_session_id)
+        self.message_submitted.emit(
+            user_text,
+            self.use_drop_context(),
+            self.active_session_id,
+            self.use_conversation_context(),
+        )
 
     def request_clear_history(self) -> None:
         self.history_clear_requested.emit(self.active_session_id)
 
     def use_drop_context(self) -> bool:
         return self.context_check is not None and self.context_check.isChecked() and not self.context_removed
+
+    def use_conversation_context(self) -> bool:
+        return self.conversation_context_check.isChecked()
 
     def drop_context_was_removed(self) -> bool:
         return self.context_removed

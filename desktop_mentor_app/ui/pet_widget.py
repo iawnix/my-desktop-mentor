@@ -13,7 +13,7 @@ from PySide6.QtWidgets import QApplication, QDialog, QMenu, QWidget
 from ..agent_client import append_memory_turn, call_agent, compact_text
 from ..assets import DEFAULT_IMAGE, convert_image_to_ico, ensure_default_icon, icon_cache_path_for_image
 from ..config_store import config_path, load_config, save_config, save_config_directory
-from ..control import ControlPlan, build_control_plan, execute_control_plan
+from ..control import ControlPlan, build_control_plan, build_control_plan_from_agent_reply, execute_control_plan
 from ..conversation_store import (
     append_chat_turn,
     build_conversation_memory_context,
@@ -98,6 +98,8 @@ from .dialogs import ChatDialog, FullScreenIdleAlert, SettingsDialog, TextViewDi
 class AgentSignals(QObject):
     reply_ready = Signal(str, str)
     error_ready = Signal(str, str)
+    # PySide6 limitation: object signals are used for dataclass payloads.
+    control_plan_ready = Signal(object, str, str, str)
 
 
 def as_global_pos(widget: QWidget, event_or_point: object) -> QPoint:
@@ -240,6 +242,7 @@ class DesktopMentorPet(QWidget):
         self.agent_signals = AgentSignals()
         self.agent_signals.reply_ready.connect(self.show_agent_reply)
         self.agent_signals.error_ready.connect(self.show_agent_error)
+        self.agent_signals.control_plan_ready.connect(self.show_agent_control_request)
 
         self.pulse_timer = QTimer(self)
         self.pulse_timer.setInterval(16)
@@ -545,6 +548,34 @@ class DesktopMentorPet(QWidget):
             and (not session_id or self.chat_dialog.active_session_id == session_id)
         ):
             self.chat_dialog.add_assistant_message(text)
+
+    def show_agent_control_request(
+        self,
+        plan: object,
+        assistant_text: str,
+        source_text: str,
+        session_id: str,
+    ) -> None:
+        if not isinstance(plan, ControlPlan):
+            self.agent_signals.error_ready.emit("电脑操作计划格式无效。", session_id)
+            return
+        if assistant_text:
+            self.show_agent_reply(assistant_text, session_id)
+        elif self.chat_dialog is not None and self.chat_dialog.waiting_for_reply:
+            self.chat_dialog.set_waiting(False)
+        if self.chat_dialog is None:
+            self.open_chat()
+        if self.chat_dialog is not None:
+            session = get_session(session_id) or ensure_active_session()
+            self.chat_dialog.set_sessions(list_conversation_sessions(), session.session_id)
+            if self.chat_dialog.active_session_id != session.session_id:
+                self.chat_dialog.set_active_session(session, load_chat_history(session.session_id))
+            else:
+                self.chat_dialog.set_active_session(session)
+            self.chat_dialog.show()
+            self.chat_dialog.raise_()
+            self.chat_dialog.activate_for_input()
+        self.request_control_authorization(plan, source_text or plan.source_text, session_id)
 
     def mark_interaction(self) -> None:
         self.last_interaction = time.monotonic()
@@ -1334,6 +1365,7 @@ class DesktopMentorPet(QWidget):
             list_conversation_sessions(),
             active_session,
             load_chat_history(active_session.session_id),
+            use_conversation_context=bool(self.config.memory_enabled),
         )
         dialog.message_submitted.connect(self.handle_chat_message)
         dialog.control_plan_approved.connect(self.approve_control_plan)
@@ -1379,14 +1411,45 @@ class DesktopMentorPet(QWidget):
             self.chat_dialog.set_active_session(session, [])
         self.show_bubble("会话历史已清空。", duration=self.message_duration(), action=STICKER_ACTION_TAP)
 
-    def handle_chat_message(self, user_prompt: str, use_drop_context: bool, session_id: str) -> None:
+    def session_for_context_policy(
+        self,
+        user_prompt: str,
+        session_id: str,
+        use_conversation_context: bool,
+    ):
+        active_session = get_session(session_id) or ensure_active_session()
+        if use_conversation_context or active_session.message_count == 0:
+            set_active_session(active_session.session_id)
+            return active_session
+        return create_conversation_session(user_prompt)
+
+    def show_user_message_for_session(self, user_prompt: str, session_id: str) -> None:
+        if self.chat_dialog is None:
+            return
+        session = get_session(session_id) or ensure_active_session()
+        if self.chat_dialog.active_session_id != session.session_id:
+            self.chat_dialog.set_sessions(list_conversation_sessions(), session.session_id)
+            self.chat_dialog.set_active_session(session, load_chat_history(session.session_id))
+        else:
+            self.chat_dialog.set_sessions(list_conversation_sessions(), session.session_id)
+        self.chat_dialog.add_user_message(user_prompt)
+        self.chat_dialog.set_waiting(True)
+
+    def handle_chat_message(
+        self,
+        user_prompt: str,
+        use_drop_context: bool,
+        session_id: str,
+        use_conversation_context: bool,
+    ) -> None:
         self.mark_interaction()
         if not user_prompt:
             if self.chat_dialog is not None:
                 self.chat_dialog.set_waiting(False)
             return
-        active_session = get_session(session_id) or ensure_active_session()
+        active_session = self.session_for_context_policy(user_prompt, session_id, use_conversation_context)
         set_active_session(active_session.session_id)
+        self.show_user_message_for_session(user_prompt, active_session.session_id)
         if self.config.control_enabled:
             control_plan = build_control_plan(user_prompt, self.config.control_workspace)
             if control_plan is not None:
@@ -1401,7 +1464,7 @@ class DesktopMentorPet(QWidget):
         self.play_action(STICKER_ACTION_THINKING, loop=True)
         thread = threading.Thread(
             target=self.fetch_agent_reply,
-            args=(prompt, user_prompt, active_session.session_id),
+            args=(prompt, user_prompt, active_session.session_id, use_conversation_context),
             daemon=True,
         )
         thread.start()
@@ -1423,9 +1486,20 @@ class DesktopMentorPet(QWidget):
     def request_control_authorization(self, plan: ControlPlan, user_prompt: str, session_id: str) -> None:
         """Queue any user-approval control plan behind the same chat authorization card."""
         self.pending_control_plans[plan.plan_id] = (plan, user_prompt, session_id)
+        if self.chat_dialog is None:
+            self.open_chat()
         if self.chat_dialog is not None:
+            session = get_session(session_id) or ensure_active_session()
+            self.chat_dialog.set_sessions(list_conversation_sessions(), session.session_id)
+            if self.chat_dialog.active_session_id != session.session_id:
+                self.chat_dialog.set_active_session(session, load_chat_history(session.session_id))
+            else:
+                self.chat_dialog.set_active_session(session)
             self.chat_dialog.add_control_plan(plan.plan_id, plan.title, plan.summary(), True)
             self.chat_dialog.set_waiting(False)
+            self.chat_dialog.show()
+            self.chat_dialog.raise_()
+            self.chat_dialog.activate_for_input()
         try:
             append_chat_turn(user_prompt, plan.summary() + "\n\n等待用户确认。", session_id)
         except Exception:
@@ -1490,10 +1564,18 @@ class DesktopMentorPet(QWidget):
             return
         user_prompt = "请先概括这些文件/文件夹的内容，再指出最值得我下一步处理的事项。"
         prompt = compose_prompt_with_drop_context(user_prompt, self.last_drop_context)
-        active_session = ensure_active_session()
+        active_session = self.session_for_context_policy(
+            user_prompt,
+            ensure_active_session().session_id,
+            bool(self.config.memory_enabled),
+        )
         self.show_bubble("导师正在看文件。", duration=min(1.8, self.message_duration()), action=None)
         self.play_action(STICKER_ACTION_THINKING, loop=True)
-        thread = threading.Thread(target=self.fetch_agent_reply, args=(prompt, "只问文件", active_session.session_id), daemon=True)
+        thread = threading.Thread(
+            target=self.fetch_agent_reply,
+            args=(prompt, "只问文件", active_session.session_id, bool(self.config.memory_enabled)),
+            daemon=True,
+        )
         thread.start()
 
     def open_drop_summary(self) -> None:
@@ -1535,10 +1617,16 @@ class DesktopMentorPet(QWidget):
         y = min(max(candidates[0].y(), area.top() + margin), area.bottom() - size.height() - margin)
         dialog.move(x, y)
 
-    def fetch_agent_reply(self, prompt: str, memory_prompt: str | None = None, session_id: str = "") -> None:
+    def fetch_agent_reply(
+        self,
+        prompt: str,
+        memory_prompt: str | None = None,
+        session_id: str = "",
+        use_conversation_context: bool = True,
+    ) -> None:
         session = get_session(session_id) or ensure_active_session()
         agent_prompt = prompt
-        if self.config.memory_enabled:
+        if use_conversation_context:
             try:
                 memory_context = build_conversation_memory_context(session.session_id, self.config.memory_turns)
             except Exception:
@@ -1546,7 +1634,11 @@ class DesktopMentorPet(QWidget):
             if memory_context:
                 agent_prompt = f"{memory_context}\n\n当前输入:\n{prompt}"
         try:
-            reply = call_agent(self.config, agent_prompt)
+            reply = call_agent(
+                self.config,
+                agent_prompt,
+                include_legacy_memory=bool(use_conversation_context and self.config.memory_enabled),
+            )
         except Exception as exc:
             reply = f"Agent 出错：{type(exc).__name__}: {exc}"
             try:
@@ -1555,11 +1647,29 @@ class DesktopMentorPet(QWidget):
                 pass
             self.agent_signals.error_ready.emit(reply, session.session_id)
             return
+        if self.config.control_enabled:
+            try:
+                control_plan, cleaned_reply = build_control_plan_from_agent_reply(reply, self.config.control_workspace)
+            except Exception:
+                control_plan, cleaned_reply = None, reply
+            if control_plan is not None:
+                if cleaned_reply:
+                    try:
+                        append_chat_turn(memory_prompt or prompt, cleaned_reply, session.session_id)
+                    except Exception:
+                        pass
+                self.agent_signals.control_plan_ready.emit(
+                    control_plan,
+                    cleaned_reply,
+                    control_plan.source_text,
+                    session.session_id,
+                )
+                return
         try:
             append_chat_turn(memory_prompt or prompt, reply, session.session_id)
         except Exception:
             pass
-        if self.config.memory_enabled:
+        if use_conversation_context and self.config.memory_enabled:
             try:
                 append_memory_turn(memory_prompt or prompt, reply)
             except Exception:

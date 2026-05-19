@@ -6,6 +6,7 @@ import re
 import secrets
 import shlex
 import time
+from dataclasses import replace
 from pathlib import Path
 
 from .permissions import can_read_path, can_run_command, can_write_path, control_workspace, resolve_user_path
@@ -43,6 +44,18 @@ READABLE_TEXT_SUFFIXES = WRITABLE_TEXT_SUFFIXES + (".tex", ".rst")
 WINDOWS_FORBIDDEN_FILENAME_CHARS = re.compile(r'[<>:"/\\|?*\x00-\x1f]')
 WINDOWS_ABSOLUTE_PATH = re.compile(r"([A-Za-z]:[\\/][^\n`\"'，。；;]+?\.(?:txt|md|log|csv|json|tex|rst))", re.IGNORECASE)
 POSIX_ABSOLUTE_PATH = re.compile(r"(/[^\n`\"'，。；;\s]+?\.(?:txt|md|log|csv|json|tex|rst))", re.IGNORECASE)
+CONTROL_REQUEST_RE = re.compile(
+    r"^\s*(?:CONTROL_REQUEST|COMPUTER_CONTROL|Computer control|电脑控制请求|电脑控制|工具请求)\s*[:：]\s*(.+?)\s*$",
+    re.IGNORECASE | re.MULTILINE,
+)
+CONTROL_REPLY_HINTS = (
+    "Computer control",
+    "电脑控制",
+    "内置电脑控制",
+    "确认卡",
+    "授权卡",
+    "允许本次",
+)
 
 
 def new_plan_id() -> str:
@@ -284,7 +297,24 @@ def build_natural_language_read_plan(text: str, workspace: Path) -> ControlPlan 
     lowered = normalized.lower()
     wants_read = any(
         keyword in normalized
-        for keyword in ("读取", "读一下", "读下", "查看", "看一下", "看下", "帮我看", "检查", "分析", "总结", "审稿", "润色")
+        for keyword in (
+            "读取",
+            "读一下",
+            "读下",
+            "读它",
+            "读这个",
+            "读该",
+            "查看",
+            "看一下",
+            "看下",
+            "看它",
+            "帮我看",
+            "检查",
+            "分析",
+            "总结",
+            "审稿",
+            "润色",
+        )
     ) or any(keyword in lowered for keyword in ("read", "view", "check", "review", "analyze", "summarize", "type "))
     wants_file_change = any(keyword in normalized for keyword in ("创建", "新建", "生成", "写入", "写上", "保存"))
     path_context = "路径" in normalized or "文件" in normalized or "path" in lowered
@@ -492,3 +522,28 @@ def build_control_plan(user_text: str, raw_workspace: str = "") -> ControlPlan |
         verb = "覆盖写入" if command == "write" else "追加写入"
         return ControlPlan(plan_id, text, action, f"{verb}文件", [f"目标：{target}", f"写入字符数：{len(content)}"], {"path": str(target), "content": content}, permission)
     return None
+
+
+def split_agent_control_request(reply_text: str) -> tuple[str, str]:
+    text = str(reply_text or "")
+    match = CONTROL_REQUEST_RE.search(text)
+    if match is None:
+        return "", text
+    request = match.group(1).strip()
+    cleaned_lines = [line for line in text.splitlines() if CONTROL_REQUEST_RE.match(line) is None]
+    return request, "\n".join(cleaned_lines).strip()
+
+
+def build_control_plan_from_agent_reply(reply_text: str, raw_workspace: str = "") -> tuple[ControlPlan | None, str]:
+    request_text, cleaned_reply = split_agent_control_request(reply_text)
+    source_text = request_text
+    lowered_reply = str(reply_text or "").lower()
+    if not source_text and any(hint.lower() in lowered_reply for hint in CONTROL_REPLY_HINTS):
+        source_text = str(reply_text or "")
+    if not source_text:
+        return None, str(reply_text or "")
+
+    plan = build_control_plan(source_text, raw_workspace)
+    if plan is not None and plan.permission == PermissionLevel.READ_ONLY:
+        plan = replace(plan, permission=PermissionLevel.USER_APPROVAL)
+    return plan, cleaned_reply

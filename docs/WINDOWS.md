@@ -49,7 +49,7 @@ dist\MyDesktopMentor.exe
 %APPDATA%\MyDesktopMentor\config.json
 ```
 
-API key、agent URL、style prompt、idle 提醒话术、点击互动话术、drop 话术、消息停留时间、idle 模式、记忆开关、电脑控制开关、配置目录和桌宠形象路径都是运行时设置，不写入项目目录。用户在设置里选择 PNG 形象时，程序会自动在 `%APPDATA%\MyDesktopMentor\icons` 下缓存对应 ICO。启用记忆后，对话上下文保存在 `%APPDATA%\MyDesktopMentor\memory.jsonl`。右键待办默认保存在 `%APPDATA%\MyDesktopMentor\todos.json`，到期提醒后会自动删除。
+API key、agent URL、style prompt、idle 提醒话术、点击互动话术、drop 话术、消息停留时间、idle 模式、模型上下文默认开关、电脑控制开关、配置目录和桌宠形象路径都是运行时设置，不写入项目目录。用户在设置里选择 PNG 形象时，程序会自动在 `%APPDATA%\MyDesktopMentor\icons` 下缓存对应 ICO。本地多会话历史保存在 `%APPDATA%\MyDesktopMentor\conversations`；启用模型上下文后，兼容记忆还会写入 `%APPDATA%\MyDesktopMentor\memory.jsonl`。右键待办默认保存在 `%APPDATA%\MyDesktopMentor\todos.json`，到期提醒后会自动删除。
 
 ## 电脑控制
 

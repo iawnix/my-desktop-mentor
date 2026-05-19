@@ -1,6 +1,6 @@
 # 我的桌面导师
 
-一个可配置的桌面导师 / 桌宠应用。主程序是 PySide6 写的透明置顶贴纸窗口，支持鼠标和触屏拖动、动作贴纸动画、贴纸旁按钮对话/设置/退出、右键待办提醒、空闲提醒、文件/文件夹拖放、OpenAI-compatible agent 接口、可选本地对话记忆、受控电脑操作，以及 Windows 打包。
+一个可配置的桌面导师 / 桌宠应用。主程序是 PySide6 写的透明置顶贴纸窗口，支持鼠标和触屏拖动、动作贴纸动画、贴纸旁按钮对话/设置/退出、右键待办提醒、空闲提醒、文件/文件夹拖放、OpenAI-compatible agent 接口、本地多会话管理、可选模型上下文、受控电脑操作，以及 Windows 打包。
 
 ## 目录
 
@@ -27,7 +27,7 @@
 - `desktop_mentor_app/assets.py`：默认资源路径、PNG 到 ICO 转换、用户图标缓存。
 - `desktop_mentor_app/conversation_store.py`：本地会话索引、每会话消息 JSONL、摘要/记忆条目和旧历史迁移。
 - `desktop_mentor_app/stickers.py`：动作贴纸集清洗、顺序保留和帧数量统计。
-- `desktop_mentor_app/agent_client.py`：OpenAI-compatible URL 归一化、请求、本地 fallback 和可选记忆拼接。
+- `desktop_mentor_app/agent_client.py`：OpenAI-compatible URL 归一化、请求、本地 fallback 和可选模型上下文拼接。
 - `desktop_mentor_app/todo_store.py`：待办清洗、排序、读写和到期过滤。
 - `desktop_mentor_app/idle_detector.py`：Windows、GNOME、xprintidle 空闲时间检测。
 - `desktop_mentor_app/drop_context.py`：文件/文件夹拖放上下文收集、敏感路径跳过和 prompt 拼接。
@@ -163,8 +163,8 @@ dist\MyDesktopMentor.exe
 - `Todo repeat`
 - `Idle reminder`
 - `Idle mode`
-- `Memory`
-- `Memory depth`
+- `模型上下文`
+- `上下文轮数`
 - `Computer control`
 - `Workspace`
 - `Style prompt`
@@ -210,9 +210,9 @@ stickers/
 
 设置、对话、待办和文件摘要窗口都是桌宠旁的伴随窗口，右下角带缩放手柄；标题栏可拖动窗口，不会替代桌宠主窗口。当前窗口主题采用本地 QSS 实现的 Fluent Dark 风格，不额外引入 QFluentWidgets 依赖；颜色、圆角、滚动条和控件尺寸集中放在 `desktop_mentor_app/ui/tokens.py`，窗口逻辑只使用语义化 `objectName`。
 
-启用 `Memory` 后，程序会把当前会话摘要、命中的记忆条目和最近若干轮消息作为上下文带给 agent；同时保留旧 `memory.jsonl` 作为兼容记忆。默认关闭，不会把历史无条件发给模型，也不会写入项目目录。
+会话管理和模型上下文是两层机制：本地会话历史负责保存、搜索和切换多个会话；模型上下文只决定本次请求是否把当前会话摘要、命中的记忆条目和最近若干轮消息带给 agent。设置里的 `模型上下文` 是聊天窗口的默认值，输入区里的 `使用当前会话上下文` 可以逐次切换。关闭时，本次输入会自动进入一个新的独立会话，旧会话仍保留在本地会话列表中，但不会作为上下文发给模型。启用时，程序同时保留旧 `memory.jsonl` 作为兼容记忆；所有这些运行时数据都在用户配置目录，不写入项目目录。
 
-启用 `Computer control` 后，对话窗口支持受控电脑操作。`/sys`、`/pwd`、`/ls`、`/read` 这类明确只读命令会直接执行；自然语言读取本机文件、列出桌面文件、运行命令、打开路径/链接、创建或写入文件会先生成统一的 `ControlPlan`。凡是权限级别为 `USER_APPROVAL` 的计划，都会走同一个授权卡接口：在会话里显示工具类别、目标详情和代码风格预览；用户点击 `允许本次` 后才动手，点击 `拒绝` 则不会执行。明确的自然语言请求也会走同一套授权流程，例如“请在桌面创建一个文件 `mentor-note.txt`，内容是「hello」”。
+启用 `Computer control` 后，对话窗口支持受控电脑操作。`/sys`、`/pwd`、`/ls`、`/read` 这类明确只读命令会直接执行；自然语言读取本机文件、列出桌面文件、运行命令、打开路径/链接、创建或写入文件会先生成统一的 `ControlPlan`。凡是权限级别为 `USER_APPROVAL` 的计划，都会走同一个授权卡接口：在会话里显示工具类别、目标详情和代码风格预览；用户点击 `允许本次` 后才动手，点击 `拒绝` 则不会执行。明确的自然语言请求也会走同一套授权流程，例如“请在桌面创建一个文件 `mentor-note.txt`，内容是「hello」”。如果 agent 回复中输出 `CONTROL_REQUEST: <动作和目标>`，或明确提到需要通过内置电脑控制读取/列出/写入目标，程序也会把该请求转成同一张授权卡并主动显示对话窗口。
 当用户要求读取或查看桌面文件时，程序会优先生成确认卡，例如“帮我看一下桌面的 `Nature_manuscript.txt`”或 `D:\DATA\Desktop\Nature_manuscript.txt`，用户点击 `允许本次` 后才读取文本预览；不会要求用户手动运行 `type` / `cat` 后再粘贴输出。
 
 支持的第一阶段/第二阶段命令：

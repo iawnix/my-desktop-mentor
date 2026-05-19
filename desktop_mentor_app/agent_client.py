@@ -17,6 +17,7 @@ from .constants import (
 CONTROL_AWARENESS_PROMPT = """运行边界：
 - 这个桌宠内置受控电脑操作层，可读取文件、列目录、搜索文本，并在写入/打开/运行前弹出确认卡。
 - 用户要求读取、查看、分析桌面或本机文件时，不要让用户手动运行 type/cat/powershell 等系统命令再复制输出。
+- 当你需要电脑操作时，在回复中单独输出一行 `CONTROL_REQUEST: <要执行的动作和目标>`，不要声称已经完成操作。
 - 读取用户本机文件前应通过内置电脑控制确认卡让用户选择；如果没有弹出工具结果，再提示用户检查设置里的 Computer control。
 - 不要声称已经读取没有实际读取的文件内容。"""
 
@@ -101,7 +102,7 @@ def agent_system_prompt(config: AgentConfig) -> str:
     return f"{base_prompt}\n\n{CONTROL_AWARENESS_PROMPT}"
 
 
-def call_agent(config: AgentConfig, user_text: str) -> str:
+def call_agent(config: AgentConfig, user_text: str, *, include_legacy_memory: bool | None = None) -> str:
     url = normalize_chat_url(config.api_url)
     if not url:
         return local_agent_reply(user_text)
@@ -114,7 +115,8 @@ def call_agent(config: AgentConfig, user_text: str) -> str:
         "temperature": 0.8,
         "max_tokens": 160,
     }
-    if config.memory_enabled:
+    should_include_legacy_memory = config.memory_enabled if include_legacy_memory is None else include_legacy_memory
+    if should_include_legacy_memory:
         payload["messages"].extend(load_memory_messages(config.memory_turns))
     payload["messages"].append({"role": "user", "content": user_text})
     headers = {"Content-Type": "application/json"}
