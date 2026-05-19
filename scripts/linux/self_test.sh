@@ -85,11 +85,21 @@ else
 fi
 
 step "Offscreen app self-test"
-QT_QPA_PLATFORM=offscreen \
-DESKTOP_MENTOR_DIAG=1 \
-DESKTOP_MENTOR_CONFIG_DIR="${DESKTOP_MENTOR_CONFIG_DIR:-/tmp/my-desktop-mentor-self-test}" \
-DESKTOP_MENTOR_PYTHON="$PYTHON_FOR_QT" \
-./scripts/linux/run_desktop_mentor.sh --self-test
+SELF_TEST_OUTPUT="$(
+  QT_QPA_PLATFORM=offscreen \
+  DESKTOP_MENTOR_DIAG=1 \
+  DESKTOP_MENTOR_CONFIG_DIR="${DESKTOP_MENTOR_CONFIG_DIR:-/tmp/my-desktop-mentor-self-test}" \
+  DESKTOP_MENTOR_PYTHON="$PYTHON_FOR_QT" \
+  ./scripts/linux/run_desktop_mentor.sh --self-test
+)"
+printf '%s\n' "$SELF_TEST_OUTPUT"
+SELF_TEST_OUTPUT="$SELF_TEST_OUTPUT" "$PYTHON_FOR_COMPILE" - <<'PY'
+import json
+import os
+
+data = json.loads(os.environ["SELF_TEST_OUTPUT"])
+assert data["quit_on_last_window_closed"] is False
+PY
 
 step "Qt dialog smoke"
 QT_QPA_PLATFORM=offscreen \

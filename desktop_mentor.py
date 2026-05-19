@@ -126,6 +126,7 @@ def main(argv: list[str]) -> int:
     if args.diagnose:
         print(json.dumps({"input_method": input_method_diagnostics()}, ensure_ascii=False), file=sys.stderr)
     app = QApplication(sys.argv[:1])
+    app.setQuitOnLastWindowClosed(False)
     app.setApplicationName(APP_NAME)
     apply_app_theme(app)
     image_path = args.image.expanduser().resolve()
@@ -156,6 +157,7 @@ def main(argv: list[str]) -> int:
             "icon_error": pet.icon_error,
             "window_size": [pet.width(), pet.height()],
             "config_path": str(pet.config_path),
+            "quit_on_last_window_closed": app.quitOnLastWindowClosed(),
         }
         print(json.dumps(result, ensure_ascii=False))
         return 0
