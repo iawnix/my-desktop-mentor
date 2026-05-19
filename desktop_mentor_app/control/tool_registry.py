@@ -41,6 +41,8 @@ HELP_TEXT = """电脑控制命令：
 WRITABLE_TEXT_SUFFIXES = (".txt", ".md", ".log", ".csv", ".json")
 READABLE_TEXT_SUFFIXES = WRITABLE_TEXT_SUFFIXES + (".tex", ".rst")
 WINDOWS_FORBIDDEN_FILENAME_CHARS = re.compile(r'[<>:"/\\|?*\x00-\x1f]')
+WINDOWS_ABSOLUTE_PATH = re.compile(r"([A-Za-z]:[\\/][^\n`\"'，。；;]+?\.(?:txt|md|log|csv|json|tex|rst))", re.IGNORECASE)
+POSIX_ABSOLUTE_PATH = re.compile(r"(/[^\n`\"'，。；;\s]+?\.(?:txt|md|log|csv|json|tex|rst))", re.IGNORECASE)
 
 
 def new_plan_id() -> str:
@@ -173,6 +175,55 @@ def extract_mentioned_filename(text: str) -> str:
     return ""
 
 
+def looks_like_path(value: str) -> bool:
+    clean = str(value or "").strip()
+    lowered = clean.lower()
+    return (
+        bool(WINDOWS_ABSOLUTE_PATH.search(clean))
+        or clean.startswith(("/", "~"))
+        or "%userprofile%" in lowered
+        or "\\" in clean
+        or "/" in clean
+    )
+
+
+def path_from_mentioned_path(raw_path: str, workspace: Path) -> Path | None:
+    clean = str(raw_path or "").strip().strip("'\"")
+    filename = extract_mentioned_filename(clean)
+    if not filename:
+        return None
+    lowered = clean.lower()
+    if "%userprofile%" in lowered and ("desktop" in lowered or "桌面" in clean):
+        return (desktop_path() / filename).expanduser().resolve(strict=False)
+    if WINDOWS_ABSOLUTE_PATH.search(clean) or POSIX_ABSOLUTE_PATH.search(clean) or clean.startswith("~"):
+        return Path(clean).expanduser().resolve(strict=False)
+    if looks_like_path(clean):
+        return resolve_user_path(clean, workspace)
+    return None
+
+
+def extract_read_target(text: str, workspace: Path) -> Path | None:
+    for segment in quoted_segments(text):
+        target = path_from_mentioned_path(segment, workspace)
+        if target is not None:
+            return target
+    windows_match = WINDOWS_ABSOLUTE_PATH.search(text)
+    if windows_match:
+        target = path_from_mentioned_path(windows_match.group(1), workspace)
+        if target is not None:
+            return target
+    posix_match = POSIX_ABSOLUTE_PATH.search(text)
+    if posix_match:
+        target = path_from_mentioned_path(posix_match.group(1), workspace)
+        if target is not None:
+            return target
+    lowered = text.lower()
+    filename = extract_mentioned_filename(text)
+    if filename and ("桌面" in text or "desktop" in lowered or "%userprofile%" in lowered):
+        return (desktop_path() / filename).expanduser().resolve(strict=False)
+    return None
+
+
 def safe_desktop_filename(value: str) -> str:
     name = WINDOWS_FORBIDDEN_FILENAME_CHARS.sub("-", str(value or "").strip())
     name = re.sub(r"\s+", " ", name).strip(" .")
@@ -231,26 +282,26 @@ def extract_write_content(text: str) -> str:
 def build_natural_language_read_plan(text: str, workspace: Path) -> ControlPlan | None:
     normalized = " ".join(text.split())
     lowered = normalized.lower()
-    mentions_desktop = "桌面" in normalized or "desktop" in lowered or "%userprofile%" in lowered
     wants_read = any(
         keyword in normalized
         for keyword in ("读取", "读一下", "读下", "查看", "看一下", "看下", "帮我看", "检查", "分析", "总结", "审稿", "润色")
     ) or any(keyword in lowered for keyword in ("read", "view", "check", "review", "analyze", "summarize", "type "))
-    filename = extract_mentioned_filename(normalized)
-    if not (mentions_desktop and wants_read and filename):
+    wants_file_change = any(keyword in normalized for keyword in ("创建", "新建", "生成", "写入", "写上", "保存"))
+    path_context = "路径" in normalized or "文件" in normalized or "path" in lowered
+    target = extract_read_target(normalized, workspace)
+    if target is None or wants_file_change or not (wants_read or path_context):
         return None
-    target = (desktop_path() / filename).expanduser().resolve(strict=False)
     permission, reason = can_read_path(target)
     if permission == PermissionLevel.BLOCKED:
-        return blocked_plan(text, "读取桌面文件被阻止", reason, [f"目标：{target}"])
+        return blocked_plan(text, "读取本机文件被阻止", reason, [f"目标：{target}"])
     return ControlPlan(
         new_plan_id(),
         text,
         "read_file",
-        "读取桌面文件",
-        [f"读取文本预览：{target}"],
+        "读取本机文件",
+        [f"目标文件：{target}", "读取后会把文本预览显示在会话里。"],
         {"path": str(target), "workspace": str(workspace)},
-        permission,
+        PermissionLevel.USER_APPROVAL,
     )
 
 

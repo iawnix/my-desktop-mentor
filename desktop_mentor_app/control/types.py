@@ -42,7 +42,7 @@ class ControlPlan:
         if self.blocked_reason:
             lines.append(f"阻止原因：{self.blocked_reason}")
         if self.requires_confirmation:
-            lines.append("确认前不会修改电脑；点“授权执行”后才会开始。")
+            lines.append("确认前不会修改电脑；点“允许本次”后才会开始。")
         lines.extend(f"{index}. {step}" for index, step in enumerate(self.steps, start=1))
         return "\n".join(lines)
 

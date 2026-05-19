@@ -293,13 +293,17 @@ with tempfile.TemporaryDirectory() as tmp:
     read_result = execute_control_plan(read_plan)
     assert read_result.ok and "alpha" in read_result.output
     nl_read_plan = build_control_plan("帮我看一下桌面的 Nature_manuscript.txt", str(control_root))
-    assert nl_read_plan is not None and nl_read_plan.permission == PermissionLevel.READ_ONLY
+    assert nl_read_plan is not None and nl_read_plan.requires_confirmation
     assert nl_read_plan.action == "read_file", nl_read_plan
     assert Path(str(nl_read_plan.args["path"])) == configured_desktop.resolve(strict=False) / "Nature_manuscript.txt"
     nl_read_result = execute_control_plan(nl_read_plan)
     assert nl_read_result.ok and "draft abstract" in nl_read_result.output
+    explicit_path_plan = build_control_plan(r"这个路径明确了：`D:\DATA\Desktop\Nature_manuscript.txt`", str(control_root))
+    assert explicit_path_plan is not None and explicit_path_plan.requires_confirmation
+    assert explicit_path_plan.action == "read_file", explicit_path_plan
+    assert str(explicit_path_plan.args["path"]).endswith(r"D:\DATA\Desktop\Nature_manuscript.txt")
     system_prompt = agent_system_prompt(AgentConfig(system_prompt="自定义风格"))
-    assert "不要让用户手动运行 type/cat/powershell" in system_prompt
+    assert "读取用户本机文件前应通过内置电脑控制确认卡让用户选择" in system_prompt
     search_plan = build_control_plan("/search beta .", str(control_root))
     assert search_plan is not None
     search_result = execute_control_plan(search_plan)
@@ -314,7 +318,7 @@ with tempfile.TemporaryDirectory() as tmp:
     assert Path(str(nl_plan.args["path"])) == configured_desktop.resolve(strict=False) / "mentor-note.txt"
     assert nl_plan.args["content"] == "hello mentor"
     assert "需要你的授权" in nl_plan.summary()
-    assert "授权执行" in nl_plan.summary()
+    assert "允许本次" in nl_plan.summary()
     nl_result = execute_control_plan(nl_plan)
     assert nl_result.ok and (configured_desktop / "mentor-note.txt").read_text(encoding="utf-8").strip() == "hello mentor"
     safe_name_plan = build_control_plan("请在桌面创建 `../bad.txt`，内容是「safe」", str(control_root))
