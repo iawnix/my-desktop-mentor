@@ -105,6 +105,7 @@ Windows 详细说明见 [docs/WINDOWS.md](docs/WINDOWS.md)。
 - `Model`
 - `Config directory`
 - `Pet image`
+- `Sticker speed`
 - `Action stickers`
 - `模型上下文`
 - `Computer control`

@@ -123,7 +123,7 @@ from desktop_mentor_app.config_store import AgentConfig, new_default_config
 from desktop_mentor_app.control import PermissionLevel, build_control_plan, build_control_plan_from_agent_reply, execute_control_plan
 from desktop_mentor_app.control.tool_registry import desktop_path
 from desktop_mentor_app.conversation_store import append_chat_turn, build_conversation_memory_context, clear_chat_history, create_conversation_session, load_chat_history, list_conversation_sessions
-from desktop_mentor_app.constants import DEFAULT_CLICK_MESSAGE, MAX_IDLE_SECONDS, MAX_PET_SIZE, MIN_PET_SIZE, STICKER_ACTION_IDLE, STICKER_ACTION_TAP
+from desktop_mentor_app.constants import DEFAULT_CLICK_MESSAGE, DEFAULT_STICKER_ANIMATION_SPEED, MAX_IDLE_SECONDS, MAX_PET_SIZE, MAX_STICKER_ANIMATION_SPEED, MIN_PET_SIZE, STICKER_ACTION_IDLE, STICKER_ACTION_TAP
 from desktop_mentor_app.drop_context import DROP_CONTEXT_PROMPT_HEADER, collect_drop_context, compose_prompt_with_drop_context
 from desktop_mentor_app.input_method import configure_linux_input_method_environment, fcitx_qt_plugin_files, input_method_diagnostics, preferred_x11_display
 from desktop_mentor_app.stickers import discover_sticker_sets
@@ -135,6 +135,8 @@ app = QApplication([])
 configure_linux_input_method_environment()
 settings = SettingsDialog(AgentConfig())
 default_config = new_default_config()
+assert default_config.sticker_animation_speed == DEFAULT_STICKER_ANIMATION_SPEED, default_config.sticker_animation_speed
+assert settings.sticker_animation_speed_spin.value() == DEFAULT_STICKER_ANIMATION_SPEED, settings.sticker_animation_speed_spin.value()
 assert all(len(paths) == 16 for paths in default_config.sticker_sets.values()), default_config.sticker_sets
 assert len(default_config.sticker_sets) == 8, default_config.sticker_sets
 chat = ChatDialog()
@@ -157,6 +159,10 @@ assert pet.pet_size == MAX_PET_SIZE, pet.pet_size
 pet.set_pet_size(120)
 pet.config.sticker_sets = discover_sticker_sets(DEFAULT_STICKERS_DIR)
 assert pet.reload_sticker_sets() == []
+assert abs(pet.sticker_frame_interval_seconds() - 0.12) < 0.001, pet.sticker_frame_interval_seconds()
+pet.config.sticker_animation_speed = 2.0
+assert abs(pet.sticker_frame_interval_seconds() - 0.06) < 0.001, pet.sticker_frame_interval_seconds()
+pet.config.sticker_animation_speed = DEFAULT_STICKER_ANIMATION_SPEED
 bundled_source = pet.current_sticker_source_rect()
 bundled_visual = pet.current_sticker_visual_rect()
 assert bundled_source.width() < 1024 and bundled_source.height() < 1024, bundled_source
@@ -350,6 +356,7 @@ with tempfile.TemporaryDirectory() as tmp:
         "idle_message": "课题如何了? 抓紧谢谢!",
         "drop_message": "这种垃圾就不要让我看, 我每天很忙的!",
         "idle_seconds": 999999,
+        "sticker_animation_speed": 99,
         "memory_enabled": "false",
     }
     custom_messages_path = Path(tmp) / "custom-messages" / "config.json"
@@ -360,6 +367,7 @@ with tempfile.TemporaryDirectory() as tmp:
     assert loaded_messages.idle_message == custom_messages["idle_message"]
     assert loaded_messages.drop_message == custom_messages["drop_message"]
     assert loaded_messages.idle_seconds == MAX_IDLE_SECONDS
+    assert loaded_messages.sticker_animation_speed == MAX_STICKER_ANIMATION_SPEED
     assert loaded_messages.memory_enabled is False
     assert loaded_messages.control_enabled is True
     configured_desktop = Path(tmp) / "configured-desktop"

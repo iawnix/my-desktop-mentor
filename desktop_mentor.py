@@ -151,6 +151,7 @@ def main(argv: list[str]) -> int:
             "idle_message": pet.config.idle_message,
             "drop_message": pet.config.drop_message,
             "message_seconds": pet.config.message_seconds,
+            "sticker_animation_speed": pet.config.sticker_animation_speed,
             "todo_repeat_seconds": pet.config.todo_repeat_seconds,
             "idle_mode": pet.config.idle_mode,
             "memory_enabled": pet.config.memory_enabled,

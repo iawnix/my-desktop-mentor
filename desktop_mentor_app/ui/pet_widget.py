@@ -32,15 +32,18 @@ from ..constants import (
     DEFAULT_IDLE_MESSAGE,
     DEFAULT_IDLE_SECONDS,
     DEFAULT_MESSAGE_SECONDS,
+    DEFAULT_STICKER_ANIMATION_SPEED,
     MAX_PET_SIZE,
     DEFAULT_TODO_REPEAT_SECONDS,
     IDLE_CHECK_INTERVAL_MS,
     IDLE_MODE_FULLSCREEN,
     MAX_MESSAGE_SECONDS,
+    MAX_STICKER_ANIMATION_SPEED,
     MAX_TODO_REPEAT_SECONDS,
     MIN_IDLE_SECONDS,
     MIN_MESSAGE_SECONDS,
     MIN_PET_SIZE,
+    MIN_STICKER_ANIMATION_SPEED,
     MIN_TODO_REPEAT_SECONDS,
     STICKER_ACTION_ALERT,
     STICKER_ACTION_DRAG,
@@ -415,6 +418,16 @@ class DesktopMentorPet(QWidget):
         if not self.pulse_timer.isActive():
             self.pulse_timer.start()
 
+    def sticker_animation_speed(self) -> float:
+        try:
+            speed = float(self.config.sticker_animation_speed)
+        except Exception:
+            speed = DEFAULT_STICKER_ANIMATION_SPEED
+        return max(MIN_STICKER_ANIMATION_SPEED, min(MAX_STICKER_ANIMATION_SPEED, speed))
+
+    def sticker_frame_interval_seconds(self) -> float:
+        return (STICKER_FRAME_INTERVAL_MS / 1000) / self.sticker_animation_speed()
+
     def play_action(self, action: str, *, duration: float = 0.0, loop: bool = True, restart: bool = True) -> None:
         if action not in STICKER_ACTIONS:
             action = STICKER_ACTION_IDLE
@@ -440,7 +453,7 @@ class DesktopMentorPet(QWidget):
         frames = self.action_frames(self.current_action)
         if len(frames) <= 1:
             return
-        interval = STICKER_FRAME_INTERVAL_MS / 1000
+        interval = self.sticker_frame_interval_seconds()
         elapsed = now - self.last_frame_at
         if elapsed < interval:
             return

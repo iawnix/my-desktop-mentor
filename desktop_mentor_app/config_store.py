@@ -23,14 +23,17 @@ from .constants import (
     DEFAULT_MESSAGE_SECONDS,
     DEFAULT_MODEL,
     DEFAULT_PERSONALITY_PROMPT,
+    DEFAULT_STICKER_ANIMATION_SPEED,
     DEFAULT_TODO_REPEAT_SECONDS,
     IDLE_MODE_OPTIONS,
     MAX_MEMORY_TURNS,
     MAX_IDLE_SECONDS,
     MAX_MESSAGE_SECONDS,
+    MAX_STICKER_ANIMATION_SPEED,
     MAX_TODO_REPEAT_SECONDS,
     MIN_IDLE_SECONDS,
     MIN_MESSAGE_SECONDS,
+    MIN_STICKER_ANIMATION_SPEED,
     MIN_TODO_REPEAT_SECONDS,
 )
 from .stickers import discover_sticker_sets, normalize_sticker_sets
@@ -55,6 +58,7 @@ class AgentConfig:
     memory_turns: int = DEFAULT_MEMORY_TURNS
     control_enabled: bool = DEFAULT_CONTROL_ENABLED
     control_workspace: str = DEFAULT_CONTROL_WORKSPACE
+    sticker_animation_speed: float = DEFAULT_STICKER_ANIMATION_SPEED
     sticker_sets: dict[str, list[str]] = field(default_factory=dict)
     system_prompt: str = DEFAULT_PERSONALITY_PROMPT
 
@@ -221,6 +225,13 @@ def load_config(path: Path | None = None) -> AgentConfig:
         )
     except Exception:
         config.message_seconds = DEFAULT_MESSAGE_SECONDS
+    try:
+        config.sticker_animation_speed = max(
+            MIN_STICKER_ANIMATION_SPEED,
+            min(MAX_STICKER_ANIMATION_SPEED, float(config.sticker_animation_speed)),
+        )
+    except Exception:
+        config.sticker_animation_speed = DEFAULT_STICKER_ANIMATION_SPEED
     try:
         config.todo_repeat_seconds = max(
             MIN_TODO_REPEAT_SECONDS,

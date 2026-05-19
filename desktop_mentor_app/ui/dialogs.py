@@ -44,6 +44,7 @@ from ..constants import (
     DEFAULT_IDLE_SECONDS,
     DEFAULT_MODEL,
     DEFAULT_PERSONALITY_PROMPT,
+    DEFAULT_STICKER_ANIMATION_SPEED,
     DEFAULT_CLICK_MESSAGE,
     DEFAULT_DROP_MESSAGE,
     DEFAULT_IDLE_MESSAGE,
@@ -55,9 +56,11 @@ from ..constants import (
     MAX_STICKER_FRAMES,
     MAX_MEMORY_TURNS,
     MAX_MESSAGE_SECONDS,
+    MAX_STICKER_ANIMATION_SPEED,
     MAX_TODO_REPEAT_SECONDS,
     MIN_IDLE_SECONDS,
     MIN_MESSAGE_SECONDS,
+    MIN_STICKER_ANIMATION_SPEED,
     MIN_TODO_REPEAT_SECONDS,
     STICKER_ACTION_LABELS,
     STICKER_ACTIONS,
@@ -416,6 +419,21 @@ class SettingsDialog(QDialog):
         self.todo_repeat_spin.setValue(max(MIN_TODO_REPEAT_SECONDS, min(MAX_TODO_REPEAT_SECONDS, int(config.todo_repeat_seconds or DEFAULT_TODO_REPEAT_SECONDS))))
         self.todo_repeat_spin.setSuffix(" s")
 
+        self.sticker_animation_speed_spin = QDoubleSpinBox()
+        self.sticker_animation_speed_spin.setRange(MIN_STICKER_ANIMATION_SPEED, MAX_STICKER_ANIMATION_SPEED)
+        self.sticker_animation_speed_spin.setSingleStep(0.25)
+        self.sticker_animation_speed_spin.setDecimals(2)
+        self.sticker_animation_speed_spin.setValue(
+            max(
+                MIN_STICKER_ANIMATION_SPEED,
+                min(
+                    MAX_STICKER_ANIMATION_SPEED,
+                    float(config.sticker_animation_speed or DEFAULT_STICKER_ANIMATION_SPEED),
+                ),
+            )
+        )
+        self.sticker_animation_speed_spin.setSuffix(" x")
+
         self.idle_spin = QSpinBox()
         self.idle_spin.setRange(MIN_IDLE_SECONDS, MAX_IDLE_SECONDS)
         self.idle_spin.setSingleStep(10)
@@ -484,6 +502,9 @@ class SettingsDialog(QDialog):
         sticker_layout = QVBoxLayout()
         sticker_layout.setContentsMargins(0, 0, 0, 0)
         sticker_layout.setSpacing(10)
+        sticker_form = modern_form_layout()
+        sticker_form.addRow("Animation speed", self.sticker_animation_speed_spin)
+        sticker_layout.addLayout(sticker_form)
         sticker_layout.addWidget(self.sticker_editor)
 
         prompt_layout = QVBoxLayout()
@@ -666,6 +687,7 @@ class SettingsDialog(QDialog):
             memory_turns=int(self.memory_turns_spin.value()),
             control_enabled=self.control_check.isChecked(),
             control_workspace=self.control_workspace_edit.text().strip(),
+            sticker_animation_speed=float(self.sticker_animation_speed_spin.value()),
             sticker_sets=self.sticker_editor.to_sticker_sets(),
             system_prompt=self.prompt_edit.toPlainText().strip() or DEFAULT_PERSONALITY_PROMPT,
         )
