@@ -50,6 +50,7 @@ step "Python syntax"
   desktop_mentor.py \
   desktop_mentor_app/constants.py \
   desktop_mentor_app/config_store.py \
+  desktop_mentor_app/input_method.py \
   desktop_mentor_app/control/__init__.py \
   desktop_mentor_app/control/audit_log.py \
   desktop_mentor_app/control/executor.py \
@@ -110,12 +111,14 @@ from desktop_mentor_app.control.tool_registry import desktop_path
 from desktop_mentor_app.conversation_store import append_chat_turn, build_conversation_memory_context, clear_chat_history, create_conversation_session, load_chat_history, list_conversation_sessions
 from desktop_mentor_app.constants import DEFAULT_CLICK_MESSAGE, MAX_IDLE_SECONDS, MAX_PET_SIZE, MIN_PET_SIZE, STICKER_ACTION_IDLE, STICKER_ACTION_TAP
 from desktop_mentor_app.drop_context import DROP_CONTEXT_PROMPT_HEADER, collect_drop_context, compose_prompt_with_drop_context
+from desktop_mentor_app.input_method import configure_linux_input_method_environment, fcitx_qt_plugin_files, preferred_x11_display
 from desktop_mentor_app.stickers import discover_sticker_sets
 from desktop_mentor_app.todo_store import load_todos, save_todos
 from desktop_mentor_app.ui.dialogs import ChatDialog, SettingsDialog, TodoDialog, prepare_modern_menu
 from desktop_mentor_app.ui.pet_widget import DesktopMentorPet
 
 app = QApplication([])
+configure_linux_input_method_environment()
 settings = SettingsDialog(AgentConfig())
 default_config = new_default_config()
 assert all(len(paths) == 8 for paths in default_config.sticker_sets.values()), default_config.sticker_sets
@@ -180,7 +183,16 @@ assert settings.settings_scroll.objectName() == "transparentScrollArea"
 assert settings.settings_scroll.viewport().objectName() == "transparentViewport"
 assert chat.history_scroll.objectName() == "transparentScrollArea"
 assert chat.history_scroll.viewport().objectName() == "transparentViewport"
+assert chat.text_edit.testAttribute(Qt.WidgetAttribute.WA_InputMethodEnabled)
+assert chat.session_search.testAttribute(Qt.WidgetAttribute.WA_InputMethodEnabled)
+assert settings.prompt_edit.testAttribute(Qt.WidgetAttribute.WA_InputMethodEnabled)
+assert settings.parent() is None
+assert chat.parent() is None
+assert todos.parent() is None
+assert chat.windowType() != Qt.WindowType.Tool
 assert menu.testAttribute(Qt.WidgetAttribute.WA_TranslucentBackground)
+assert isinstance(preferred_x11_display(), str)
+assert isinstance(fcitx_qt_plugin_files(), list)
 settings.scroll_to_section(2)
 assert any(button.text() == "互动" and button.objectName() == "railNavButtonActive" for button in nav_buttons)
 assert settings.sticker_editor.to_sticker_sets() == {}
@@ -198,6 +210,13 @@ assert chat.waiting_for_reply
 chat.add_assistant_message("新的回答")
 chat.set_waiting(False)
 assert not chat.waiting_for_reply
+pet.open_chat()
+assert pet.chat_dialog is not None
+assert pet.chat_dialog.parent() is None
+assert pet.chat_dialog.testAttribute(Qt.WidgetAttribute.WA_InputMethodEnabled)
+assert pet.chat_dialog.windowType() != Qt.WindowType.Tool
+pet.chat_dialog.close()
+pet.chat_dialog = None
 switched_session = create_conversation_session("切换后的会话")
 pet.chat_dialog = ChatDialog(sessions=list_conversation_sessions(), active_session=managed_session, history=[])
 pet.chat_dialog.set_waiting(True)

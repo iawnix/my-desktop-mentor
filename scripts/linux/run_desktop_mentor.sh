@@ -39,6 +39,34 @@ ensure_xauthority() {
   done
 }
 
+ensure_session_bus() {
+  if [[ -z "${XDG_RUNTIME_DIR:-}" && -d "/run/user/$(id -u)" ]]; then
+    export XDG_RUNTIME_DIR="/run/user/$(id -u)"
+  fi
+  if [[ -z "${DBUS_SESSION_BUS_ADDRESS:-}" && -n "${XDG_RUNTIME_DIR:-}" && -S "$XDG_RUNTIME_DIR/bus" ]]; then
+    export DBUS_SESSION_BUS_ADDRESS="unix:path=$XDG_RUNTIME_DIR/bus"
+  fi
+}
+
+preferred_x11_display() {
+  local socket uid socket_uid
+  uid="$(id -u)"
+  for socket in /tmp/.X11-unix/X*; do
+    [[ -S "$socket" ]] || continue
+    socket_uid="$(stat -c '%u' "$socket" 2>/dev/null || true)"
+    if [[ "$socket_uid" == "$uid" ]]; then
+      printf ':%s\n' "${socket##*/X}"
+      return 0
+    fi
+  done
+  for socket in /tmp/.X11-unix/X*; do
+    [[ -S "$socket" ]] || continue
+    printf ':%s\n' "${socket##*/X}"
+    return 0
+  done
+  return 1
+}
+
 qt_platform_can_start() {
   local platform="$1"
   QT_QPA_PLATFORM="$platform" "$PYTHON_BIN" - <<'PY' >/dev/null 2>&1
@@ -54,11 +82,14 @@ configure_input_method() {
     return 0
   fi
 
+  ensure_session_bus
+
   local module="${DESKTOP_MENTOR_IM_MODULE:-}"
+  module="${module,,}"
   if [[ -z "$module" ]]; then
     if [[ "${QT_IM_MODULE:-}" == fcitx* || "${XMODIFIERS:-}" == *@im=fcitx* ]]; then
       module="fcitx"
-    elif command -v fcitx5 >/dev/null 2>&1 || pgrep -x fcitx5 >/dev/null 2>&1; then
+    elif [[ -z "${QT_IM_MODULE:-}" ]] && command -v fcitx5 >/dev/null 2>&1; then
       module="fcitx"
     fi
   fi
@@ -74,16 +105,20 @@ configure_input_method() {
     export SDL_IM_MODULE="${SDL_IM_MODULE:-fcitx}"
     export GLFW_IM_MODULE="${GLFW_IM_MODULE:-ibus}"
   elif [[ -n "$module" ]]; then
-    export QT_IM_MODULE="${QT_IM_MODULE:-$module}"
+    if [[ -n "${DESKTOP_MENTOR_IM_MODULE:-}" || -z "${QT_IM_MODULE:-}" ]]; then
+      export QT_IM_MODULE="$module"
+    fi
   fi
 }
 
 prefer_xcb_platform() {
   ensure_xauthority
-  if [[ -z "${DISPLAY:-}" && -S /tmp/.X11-unix/X0 ]]; then
-    export DISPLAY=:0
-  elif [[ -z "${DISPLAY:-}" && -S /tmp/.X11-unix/X1 ]]; then
-    export DISPLAY=:1
+  if [[ -z "${DISPLAY:-}" ]]; then
+    local selected_display
+    selected_display="$(preferred_x11_display || true)"
+    if [[ -n "$selected_display" ]]; then
+      export DISPLAY="$selected_display"
+    fi
   fi
 
   if [[ -z "${DISPLAY:-}" && ! -S /tmp/.X11-unix/X0 && ! -S /tmp/.X11-unix/X1 ]]; then
@@ -199,6 +234,17 @@ print(f"[desktop-mentor] XAUTHORITY: {os.environ.get('XAUTHORITY', '')}", file=s
 print(f"[desktop-mentor] QT_IM_MODULE: {os.environ.get('QT_IM_MODULE', '')}", file=sys.stderr)
 print(f"[desktop-mentor] XMODIFIERS: {os.environ.get('XMODIFIERS', '')}", file=sys.stderr)
 print(f"[desktop-mentor] GTK_IM_MODULE: {os.environ.get('GTK_IM_MODULE', '')}", file=sys.stderr)
+print(f"[desktop-mentor] DBUS_SESSION_BUS_ADDRESS: {os.environ.get('DBUS_SESSION_BUS_ADDRESS', '')}", file=sys.stderr)
+try:
+    from desktop_mentor_app.input_method import configure_qt_input_method_runtime, input_method_diagnostics
+
+    configure_qt_input_method_runtime()
+    diag = input_method_diagnostics()
+    print(f"[desktop-mentor] fcitx5_remote: {diag.get('fcitx5_remote', '')}", file=sys.stderr)
+    print(f"[desktop-mentor] fcitx_qt_plugin_files: {diag.get('fcitx_qt_plugin_files', [])}", file=sys.stderr)
+    print(f"[desktop-mentor] qt_library_paths: {diag.get('qt_library_paths', [])}", file=sys.stderr)
+except Exception as exc:
+    print(f"[desktop-mentor] input method diagnostics unavailable: {type(exc).__name__}: {exc}", file=sys.stderr)
 PY
 fi
 

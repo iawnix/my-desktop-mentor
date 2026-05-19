@@ -262,6 +262,8 @@ class DesktopMentorPet(QWidget):
 
         self.setAttribute(Qt.WidgetAttribute.WA_TranslucentBackground, True)
         self.setAttribute(Qt.WidgetAttribute.WA_AcceptTouchEvents, True)
+        self.setAttribute(Qt.WidgetAttribute.WA_ShowWithoutActivating, True)
+        self.setFocusPolicy(Qt.FocusPolicy.NoFocus)
         self.setAcceptDrops(True)
         self.setMouseTracking(True)
         self.resize(*self.window_dimensions())
@@ -1236,8 +1238,9 @@ class DesktopMentorPet(QWidget):
 
     def open_settings(self) -> None:
         self.mark_interaction()
-        dialog = SettingsDialog(self.config, self)
+        dialog = SettingsDialog(self.config)
         self.position_dialog_near_pet(dialog)
+        dialog.activate_for_input()
         if dialog.exec() == QDialog.DialogCode.Accepted:
             old_config = self.config
             old_config_path = self.config_path
@@ -1281,8 +1284,9 @@ class DesktopMentorPet(QWidget):
 
     def open_todos(self) -> None:
         self.mark_interaction()
-        dialog = TodoDialog(load_todos(), self)
+        dialog = TodoDialog(load_todos())
         self.position_dialog_near_pet(dialog)
+        dialog.activate_for_input()
         dialog.exec()
         path = save_todos(dialog.todos)
         self.sync_todo_bubbles_with_store()
@@ -1325,7 +1329,7 @@ class DesktopMentorPet(QWidget):
 
         active_session = ensure_active_session()
         dialog = ChatDialog(
-            self,
+            None,
             self.drop_context_hint(),
             list_conversation_sessions(),
             active_session,
@@ -1341,8 +1345,7 @@ class DesktopMentorPet(QWidget):
         self.chat_dialog = dialog
         self.position_dialog_near_pet(dialog)
         dialog.show()
-        dialog.raise_()
-        dialog.activateWindow()
+        dialog.activate_for_input()
 
     def clear_chat_dialog(self, dialog: ChatDialog) -> None:
         if self.chat_dialog is dialog:
@@ -1494,8 +1497,9 @@ class DesktopMentorPet(QWidget):
         if not self.last_drop_context:
             self.show_bubble("还没有拖入文件。", duration=self.message_duration())
             return
-        dialog = TextViewDialog("文件摘要", self.last_drop_context, self)
+        dialog = TextViewDialog("文件摘要", self.last_drop_context)
         self.position_dialog_near_pet(dialog)
+        dialog.activate_for_input()
         dialog.exec()
 
     def clear_drop_context(self) -> None:

@@ -59,7 +59,17 @@ cd my-desktop-mentor
 
 在 GNOME/Wayland 桌面下，启动脚本会优先探测可用的 XWayland/xcb 后端，因为普通 Qt 顶层窗口在 Wayland 下不能总是可靠执行程序式移动；如果 xcb 不可用，会回退到 Wayland 并使用 Qt 原生系统移动接口作为拖动兜底。右键菜单同时兼容鼠标右键和系统上下文菜单事件。
 
-Linux 中文输入法：启动脚本会在检测到 fcitx5 时为 Qt 设置 `QT_IM_MODULE=fcitx`、`XMODIFIERS=@im=fcitx`、`GTK_IM_MODULE=fcitx`，降低 PySide6 输入框偶发无法切换中文的问题。如果你的桌面使用其他输入法框架，可以用 `DESKTOP_MENTOR_IM_MODULE=ibus` 指定，或用 `DESKTOP_MENTOR_IM_MODULE=none` 完全关闭自动设置。`--diagnose` 会打印当前输入法相关环境变量。
+Linux 中文输入法：启动脚本会在检测到 fcitx5 时为 Qt 设置 `QT_IM_MODULE=fcitx`、`XMODIFIERS=@im=fcitx`、`GTK_IM_MODULE=fcitx`，补齐 `XDG_RUNTIME_DIR` / `DBUS_SESSION_BUS_ADDRESS`，并把系统 Qt 的 fcitx 平台输入插件目录加入 Qt library paths，避免 Conda/PySide6 自带插件目录缺少 fcitx 时中文无法进入输入框。如果你的桌面使用其他输入法框架，可以用 `DESKTOP_MENTOR_IM_MODULE=ibus` 指定，或用 `DESKTOP_MENTOR_IM_MODULE=none` 完全关闭自动设置。`--diagnose` 会打印当前输入法环境、fcitx 运行状态、插件文件和 Qt library paths。
+
+桌宠本体是透明置顶工具窗，但聊天、设置、待办等需要键盘输入的窗口会作为独立普通顶层窗口打开，不挂在桌宠工具窗下面。这样可以避免 Linux/X11/Wayland 输入法把焦点留在桌宠或其他应用上，是桌宠类 Qt 应用更通用的输入法兼容方案。
+
+如果从桌面启动器打开后 fcitx 仍然无效，可以在 `.desktop` 的 `Exec` 前加一层 `env`，显式注入输入法环境变量：
+
+```ini
+Exec=env QT_IM_MODULE=fcitx XMODIFIERS=@im=fcitx GTK_IM_MODULE=fcitx SDL_IM_MODULE=fcitx DESKTOP_MENTOR_IM_MODULE=fcitx /opt/my-desktop-mentor/scripts/linux/run_desktop_mentor.sh
+```
+
+用户级 `.desktop` 通常在 `~/.local/share/applications/`；系统级启动器通常在 `/usr/share/applications/`，修改后可按桌面环境需要重新登录或刷新应用列表。
 
 直接用 Python 运行也可以，但需要当前 Python 能导入 `PySide6`：
 

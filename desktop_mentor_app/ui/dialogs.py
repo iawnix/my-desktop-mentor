@@ -105,6 +105,11 @@ def make_transparent(widget: QWidget) -> QWidget:
     return widget
 
 
+def enable_text_input(widget: QWidget) -> None:
+    widget.setAttribute(Qt.WidgetAttribute.WA_InputMethodEnabled, True)
+    widget.setFocusPolicy(Qt.FocusPolicy.StrongFocus)
+
+
 def transparent_frame() -> QFrame:
     return make_transparent(QFrame())  # type: ignore[return-value]
 
@@ -131,10 +136,33 @@ def style_dialog_buttons(buttons: QDialogButtonBox, primary: QDialogButtonBox.St
 
 def setup_modern_dialog(dialog: QDialog) -> None:
     dialog.setWindowFlag(Qt.WindowType.FramelessWindowHint, True)
+    dialog.setWindowFlag(Qt.WindowType.Tool, False)
     dialog.setAttribute(Qt.WidgetAttribute.WA_TranslucentBackground, True)
     dialog.setAttribute(Qt.WidgetAttribute.WA_StyledBackground, True)
+    dialog.setAttribute(Qt.WidgetAttribute.WA_InputMethodEnabled, True)
     apply_app_theme(dialog)
     dialog.setObjectName("dialogSurface")
+
+
+def activate_input_window(dialog: QDialog, focus_widget: QWidget | None = None) -> None:
+    """Activate a standalone text-capable dialog and refresh its input focus."""
+    dialog.raise_()
+    dialog.activateWindow()
+
+    if focus_widget is None:
+        return
+
+    def focus_now() -> None:
+        if not dialog.isVisible():
+            return
+        focus_widget.setFocus(Qt.FocusReason.ActiveWindowFocusReason)
+        try:
+            focus_widget.updateMicroFocus()
+        except Exception:
+            pass
+
+    QTimer.singleShot(0, focus_now)
+    QTimer.singleShot(80, focus_now)
 
 
 def add_resize_grip(shell_layout: QVBoxLayout, owner: QDialog) -> QSizeGrip:
@@ -553,7 +581,13 @@ class SettingsDialog(QDialog):
         layout.setContentsMargins(10, 10, 10, 10)
         layout.setSpacing(0)
         layout.addWidget(shell)
+        for widget_type in (QLineEdit, QTextEdit):
+            for widget in self.findChildren(widget_type):
+                enable_text_input(widget)
         QTimer.singleShot(0, lambda: self.set_active_nav(0))
+
+    def activate_for_input(self) -> None:
+        activate_input_window(self)
 
     def set_active_nav(self, active_index: int) -> None:
         for index, button in enumerate(self.nav_buttons):
@@ -705,6 +739,8 @@ class ChatDialog(QDialog):
         self.text_edit.setPlaceholderText("告诉桌宠你的目标、卡点，或输入 / 命令调用工具")
         self.text_edit.setMinimumHeight(64)
         self.text_edit.setMaximumHeight(96)
+        enable_text_input(self.text_edit)
+        enable_text_input(self.session_search)
 
         send_button = QPushButton("发送")
         mark_button(send_button, "primaryButton")
@@ -1199,7 +1235,13 @@ class ChatDialog(QDialog):
 
     def showEvent(self, event) -> None:  # type: ignore[override]
         super().showEvent(event)
-        self.text_edit.setFocus(Qt.FocusReason.OtherFocusReason)
+        QTimer.singleShot(0, self.focus_composer)
+
+    def focus_composer(self) -> None:
+        activate_input_window(self, self.text_edit)
+
+    def activate_for_input(self) -> None:
+        activate_input_window(self, self.text_edit)
 
 
 class TextViewDialog(QDialog):
@@ -1246,6 +1288,9 @@ class TextViewDialog(QDialog):
         layout.setSpacing(0)
         layout.addWidget(shell)
 
+    def activate_for_input(self) -> None:
+        activate_input_window(self)
+
 
 class TodoDialog(QDialog):
     def __init__(self, todos: list[dict[str, object]], parent: QWidget | None = None) -> None:
@@ -1274,6 +1319,7 @@ class TodoDialog(QDialog):
 
         self.todo_edit = QLineEdit()
         self.todo_edit.setPlaceholderText("要提醒的事情")
+        enable_text_input(self.todo_edit)
 
         self.due_edit = QDateTimeEdit(QDateTime.currentDateTime().addSecs(30 * 60))
         self.due_edit.setCalendarPopup(False)
@@ -1340,6 +1386,9 @@ class TodoDialog(QDialog):
         layout.setSpacing(0)
         layout.addWidget(shell)
         self.refresh_list()
+
+    def activate_for_input(self) -> None:
+        activate_input_window(self, self.todo_edit)
 
     def refresh_list(self) -> None:
         self.todo_list.clear()

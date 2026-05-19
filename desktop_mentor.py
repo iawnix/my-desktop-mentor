@@ -5,10 +5,18 @@ from __future__ import annotations
 import argparse
 import json
 import os
-import shutil
 import subprocess
 import sys
 from pathlib import Path
+
+from desktop_mentor_app.input_method import (
+    configure_linux_input_method_environment,
+    configure_qt_input_method_runtime,
+    input_method_diagnostics,
+    preferred_x11_display,
+)
+
+configure_linux_input_method_environment()
 
 from PySide6.QtCore import QTimer
 from PySide6.QtWidgets import QApplication
@@ -29,38 +37,12 @@ def parse_args(argv: list[str]) -> argparse.Namespace:
     parser.add_argument("--size", type=int, default=DEFAULT_PET_SIZE, help="portrait size in pixels")
     parser.add_argument("--quit-after", type=float, default=0.0, help="exit after N seconds")
     parser.add_argument("--self-test", action="store_true", help="load the app without opening a visible pet")
+    parser.add_argument("--diagnose", action="store_true", help="print Linux display/input-method diagnostics")
     parser.add_argument("--make-icon", nargs=2, metavar=("SOURCE_IMAGE", "OUTPUT_ICO"), help="convert a PNG/image file to ICO")
     parser.add_argument("--ensure-default-icon", action="store_true", help="generate assets/desktop_mentor.ico from the default mentor PNG")
     parser.add_argument("--force-icon", action="store_true", help="regenerate ICO even when the target is newer")
     parser.add_argument("--load-sticker-dir", type=Path, help="load action sticker frames from a directory with idle/tap/drag/... subfolders")
     return parser.parse_args(argv)
-
-
-def configure_linux_input_method() -> None:
-    if not sys.platform.startswith("linux"):
-        return
-    requested = os.environ.get("DESKTOP_MENTOR_IM_MODULE", "").strip().lower()
-    if requested in {"none", "off"}:
-        return
-    module = requested
-    if not module:
-        qt_im = os.environ.get("QT_IM_MODULE", "")
-        xmodifiers = os.environ.get("XMODIFIERS", "")
-        if qt_im.startswith("fcitx") or "@im=fcitx" in xmodifiers:
-            module = "fcitx"
-        elif shutil.which("fcitx5") is not None:
-            module = "fcitx"
-    if module in {"fcitx", "fcitx5"}:
-        if not os.environ.get("QT_IM_MODULE") or os.environ.get("QT_IM_MODULE") == "fcitx5":
-            os.environ["QT_IM_MODULE"] = "fcitx"
-        if not os.environ.get("XMODIFIERS") or os.environ.get("XMODIFIERS") == "@im=fcitx5":
-            os.environ["XMODIFIERS"] = "@im=fcitx"
-        os.environ.setdefault("GTK_IM_MODULE", "fcitx")
-        os.environ.setdefault("SDL_IM_MODULE", "fcitx")
-        os.environ.setdefault("GLFW_IM_MODULE", "ibus")
-    elif module:
-        os.environ.setdefault("QT_IM_MODULE", module)
-
 
 def prefer_movable_linux_platform() -> None:
     if not sys.platform.startswith("linux"):
@@ -77,8 +59,9 @@ def prefer_movable_linux_platform() -> None:
                 os.environ["XAUTHORITY"] = str(auth_file)
                 break
 
-    if not os.environ.get("DISPLAY") and Path("/tmp/.X11-unix/X0").exists():
-        os.environ["DISPLAY"] = ":0"
+    display = preferred_x11_display()
+    if not os.environ.get("DISPLAY") and display:
+        os.environ["DISPLAY"] = display
     if (
         os.environ.get("DISPLAY") or Path("/tmp/.X11-unix/X0").exists() or Path("/tmp/.X11-unix/X1").exists()
     ) and qt_platform_can_start("xcb"):
@@ -137,8 +120,11 @@ def main(argv: list[str]) -> int:
         )
         return 0
 
-    configure_linux_input_method()
+    configure_linux_input_method_environment()
     prefer_movable_linux_platform()
+    configure_qt_input_method_runtime()
+    if args.diagnose:
+        print(json.dumps({"input_method": input_method_diagnostics()}, ensure_ascii=False), file=sys.stderr)
     app = QApplication(sys.argv[:1])
     app.setApplicationName(APP_NAME)
     apply_app_theme(app)
