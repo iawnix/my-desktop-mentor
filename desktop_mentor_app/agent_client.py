@@ -12,6 +12,7 @@ from .constants import (
     DEFAULT_MODEL,
     DEFAULT_PERSONALITY_PROMPT,
     MAX_AGENT_REPLY_CHARS,
+    MAX_AGENT_REPLY_TOKENS,
 )
 
 CONTROL_AWARENESS_PROMPT = """运行边界：
@@ -38,6 +39,13 @@ def compact_text(text: str, limit: int = 72) -> str:
     if len(clean) <= limit:
         return clean
     return clean[: max(1, limit - 1)] + "…"
+
+
+def limit_formatted_text(text: str, limit: int) -> str:
+    clean = str(text or "").strip()
+    if len(clean) <= limit:
+        return clean
+    return clean[: max(1, limit - 1)].rstrip() + "…"
 
 
 def local_agent_reply(user_text: str, *, idle: bool = False) -> str:
@@ -113,7 +121,7 @@ def call_agent(config: AgentConfig, user_text: str, *, include_legacy_memory: bo
             {"role": "system", "content": agent_system_prompt(config)},
         ],
         "temperature": 0.8,
-        "max_tokens": 160,
+        "max_tokens": MAX_AGENT_REPLY_TOKENS,
     }
     should_include_legacy_memory = config.memory_enabled if include_legacy_memory is None else include_legacy_memory
     if should_include_legacy_memory:
@@ -139,4 +147,4 @@ def call_agent(config: AgentConfig, user_text: str, *, include_legacy_memory: bo
         content = data["choices"][0]["message"]["content"]
     except Exception:
         content = data.get("response") or data.get("text") or data.get("message") or ""
-    return compact_text(str(content or local_agent_reply(user_text)), MAX_AGENT_REPLY_CHARS)
+    return limit_formatted_text(str(content or local_agent_reply(user_text)), MAX_AGENT_REPLY_CHARS)

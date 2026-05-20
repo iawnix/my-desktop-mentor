@@ -10,6 +10,11 @@ from .tokens import FLUENT_DARK_COLORS
 MathReplacement = tuple[str, str, bool]
 
 _FENCE_RE = re.compile(r"^\s{0,3}(```+|~~~+)")
+_INLINE_FENCE_RE = re.compile(r"(?<!\n)(```+|~~~+)")
+_FENCE_WITH_SAME_LINE_CODE_RE = re.compile(
+    r"(```+|~~~+)([A-Za-z0-9_+.#-]{1,32})[ \t]+(?=\S)"
+)
+_FENCE_WITH_SAME_LINE_TEXT_RE = re.compile(r"(```+|~~~+)[ \t]+(?=\S)")
 _BLOCK_MATH_RE = re.compile(r"(?<!\\)\$\$(.+?)(?<!\\)\$\$", re.DOTALL)
 _INLINE_MATH_RE = re.compile(r"(?<!\\)\$(?![\s$])(.+?)(?<![\s\\])\$(?!\d)", re.DOTALL)
 
@@ -54,6 +59,16 @@ def _math_to_html(source: str, display: bool) -> str:
         if display:
             return f'<div class="math math-block math-source"><code>{escaped}</code></div>'
         return f'<span class="math math-inline math-source"><code>{escaped}</code></span>'
+
+
+def normalize_model_markdown(markdown: str) -> str:
+    normalized = str(markdown or "").replace("\r\n", "\n").replace("\r", "\n").strip()
+    if "```" not in normalized and "~~~" not in normalized:
+        return normalized
+    normalized = _INLINE_FENCE_RE.sub(r"\n\1", normalized)
+    normalized = _FENCE_WITH_SAME_LINE_CODE_RE.sub(r"\1\2\n", normalized)
+    normalized = _FENCE_WITH_SAME_LINE_TEXT_RE.sub(r"\1\n", normalized)
+    return normalized.strip()
 
 
 def _replace_math_in_text(text: str, add_replacement: Callable[[str, bool], str]) -> str:
@@ -106,7 +121,8 @@ def _extract_math(markdown: str) -> tuple[str, list[MathReplacement]]:
 
 
 def _render_markdown(markdown: str) -> str:
-    protected_markdown, math_replacements = _extract_math(markdown)
+    normalized_markdown = normalize_model_markdown(markdown)
+    protected_markdown, math_replacements = _extract_math(normalized_markdown)
     try:
         from markdown_it import MarkdownIt
 

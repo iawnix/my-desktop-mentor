@@ -117,7 +117,7 @@ from PySide6.QtCore import Qt
 from PySide6.QtWidgets import QApplication, QFrame, QMenu, QPushButton, QScrollArea, QWidget
 
 from desktop_mentor_app import config_store
-from desktop_mentor_app.agent_client import agent_system_prompt
+from desktop_mentor_app.agent_client import agent_system_prompt, compact_text, limit_formatted_text
 from desktop_mentor_app.assets import DEFAULT_IMAGE, DEFAULT_STICKERS_DIR, ROOT
 from desktop_mentor_app.config_store import AgentConfig, new_default_config
 from desktop_mentor_app.control import PermissionLevel, build_control_plan, build_control_plan_from_agent_reply, execute_control_plan
@@ -129,7 +129,7 @@ from desktop_mentor_app.input_method import configure_linux_input_method_environ
 from desktop_mentor_app.stickers import discover_sticker_sets
 from desktop_mentor_app.todo_store import load_todos, save_todos
 from desktop_mentor_app.ui.dialogs import ChatDialog, SettingsDialog, TodoDialog, prepare_modern_menu
-from desktop_mentor_app.ui.markdown_rendering import render_markdown_fragment
+from desktop_mentor_app.ui.markdown_rendering import normalize_model_markdown, render_markdown_fragment
 from desktop_mentor_app.ui.pet_widget import DesktopMentorPet
 
 app = QApplication([])
@@ -150,6 +150,12 @@ rendered_markdown = render_markdown_fragment(markdown_sample)
 assert "codehilite" in rendered_markdown, rendered_markdown
 assert "math-block" in rendered_markdown, rendered_markdown
 assert "<math" in rendered_markdown, rendered_markdown
+collapsed_fence = "说明。 ```python import asyncio ```"
+normalized_fence = normalize_model_markdown(collapsed_fence)
+assert "```python\nimport asyncio" in normalized_fence, normalized_fence
+assert "codehilite" in render_markdown_fragment(collapsed_fence)
+assert compact_text("a\nb", 10) == "a b"
+assert limit_formatted_text("a\nb", 10) == "a\nb"
 clear_chat_history()
 assert load_chat_history() == []
 managed_session = append_chat_turn("记住我的默认项目是导师桌宠", "已记住")
