@@ -106,6 +106,7 @@ QT_QPA_PLATFORM=offscreen \
 DESKTOP_MENTOR_CONFIG_DIR="${DESKTOP_MENTOR_CONFIG_DIR:-/tmp/my-desktop-mentor-self-test}" \
 "$PYTHON_FOR_QT" - <<'PY'
 import time
+import builtins
 import os
 import shutil
 import shlex
@@ -113,7 +114,8 @@ import sys
 import tempfile
 from pathlib import Path
 
-from PySide6.QtCore import Qt
+from PySide6.QtCore import QEvent, Qt
+from PySide6.QtGui import QKeyEvent, QTextCursor
 from PySide6.QtWidgets import QApplication, QFrame, QMenu, QPushButton, QScrollArea, QWidget
 
 from desktop_mentor_app import config_store
@@ -146,16 +148,43 @@ markdown_sample = "**结论**\n\n- Markdown 列表\n\n```python\nprint('ok')\n``
 chat.add_assistant_message(markdown_sample)
 markdown_views = chat.findChildren(QWidget, "chatMarkdownMessage")
 assert markdown_views, "assistant replies should render through a Markdown message view"
+assistant_cards = chat.findChildren(QFrame, "chatMessageCardAssistant")
+assert assistant_cards, "assistant replies should be wrapped in a message card"
 rendered_markdown = render_markdown_fragment(markdown_sample)
 assert "codehilite" in rendered_markdown, rendered_markdown
 assert "math-block" in rendered_markdown, rendered_markdown
 assert "<math" in rendered_markdown, rendered_markdown
+assert "```" not in rendered_markdown, rendered_markdown
 collapsed_fence = "说明。 ```python import asyncio ```"
 normalized_fence = normalize_model_markdown(collapsed_fence)
 assert "```python\nimport asyncio" in normalized_fence, normalized_fence
 assert "codehilite" in render_markdown_fragment(collapsed_fence)
+original_import = builtins.__import__
+def blocked_markdown_it_import(name, globals=None, locals=None, fromlist=(), level=0):
+    if name == "markdown_it" or name.startswith("markdown_it."):
+        raise ModuleNotFoundError(name)
+    return original_import(name, globals, locals, fromlist, level)
+builtins.__import__ = blocked_markdown_it_import
+try:
+    fallback_html = render_markdown_fragment("```python\nprint('ok')\n```")
+finally:
+    builtins.__import__ = original_import
+assert "codehilite" in fallback_html, fallback_html
+assert "```" not in fallback_html, fallback_html
 assert compact_text("a\nb", 10) == "a b"
 assert limit_formatted_text("a\nb", 10) == "a\nb"
+submitted = []
+chat.text_edit.submitted.connect(lambda: submitted.append(True))
+chat.text_edit.setPlainText("send me")
+chat.text_edit.keyPressEvent(QKeyEvent(QEvent.Type.KeyPress, Qt.Key.Key_Return, Qt.KeyboardModifier.NoModifier))
+assert submitted, "Enter should submit chat input"
+chat.set_waiting(False)
+chat.text_edit.setPlainText("line 1")
+cursor = chat.text_edit.textCursor()
+cursor.movePosition(QTextCursor.MoveOperation.End)
+chat.text_edit.setTextCursor(cursor)
+chat.text_edit.keyPressEvent(QKeyEvent(QEvent.Type.KeyPress, Qt.Key.Key_Return, Qt.KeyboardModifier.ShiftModifier))
+assert chat.text_edit.toPlainText() == "line 1\n", chat.text_edit.toPlainText()
 clear_chat_history()
 assert load_chat_history() == []
 managed_session = append_chat_turn("记住我的默认项目是导师桌宠", "已记住")

@@ -113,6 +113,16 @@ QFrame#chatBubbleUser {
     border: 1px solid %(accent_border)s;
     border-radius: %(surface)spx;
 }
+QFrame#chatMessageCardAssistant {
+    background: %(surface_card)s;
+    border: 1px solid %(border_card)s;
+    border-radius: %(surface)spx;
+}
+QFrame#chatMessageCardUser {
+    background: %(accent_soft)s;
+    border: 1px solid %(accent_border)s;
+    border-radius: %(surface)spx;
+}
 QFrame#chatComposer {
     background: %(surface_card)s;
     border: 1px solid %(border_control)s;

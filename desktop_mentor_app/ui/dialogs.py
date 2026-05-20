@@ -6,7 +6,7 @@ import time
 from pathlib import Path
 
 from PySide6.QtCore import QDateTime, QPoint, QRect, QRectF, QTimer, Qt, QEvent, QUrl, Signal
-from PySide6.QtGui import QColor, QFont, QGuiApplication, QMouseEvent, QPainter, QPen, QPixmap, QTextCursor, QBrush
+from PySide6.QtGui import QColor, QFont, QGuiApplication, QKeyEvent, QMouseEvent, QPainter, QPen, QPixmap, QTextCursor, QBrush
 from PySide6.QtWidgets import (
     QCheckBox,
     QComboBox,
@@ -74,7 +74,7 @@ from ..constants import (
 )
 from ..stickers import discover_sticker_sets, normalize_sticker_sets
 from ..todo_store import format_due_time, load_todos_from_items
-from .markdown_rendering import render_markdown_document
+from .markdown_rendering import markdown_css, render_markdown_document, render_markdown_fragment
 from .theme import apply_app_theme
 from .tokens import FULLSCREEN_ALERT_DURATION_MS
 
@@ -97,6 +97,20 @@ def webengine_markdown_enabled() -> bool:
     return "offscreen" not in platform and "minimal" not in platform
 
 
+class ChatInputEdit(QTextEdit):
+    submitted = Signal()
+
+    def keyPressEvent(self, event: QKeyEvent) -> None:  # type: ignore[override]
+        if event.key() in {Qt.Key.Key_Return, Qt.Key.Key_Enter}:
+            if event.modifiers() & Qt.KeyboardModifier.ShiftModifier:
+                super().keyPressEvent(event)
+            else:
+                self.submitted.emit()
+                event.accept()
+            return
+        super().keyPressEvent(event)
+
+
 class TextMarkdownMessageView(QTextBrowser):
     def __init__(self, markdown: str, parent: QWidget | None = None) -> None:
         super().__init__(parent)
@@ -112,7 +126,8 @@ class TextMarkdownMessageView(QTextBrowser):
         )
         self.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Minimum)
         self.document().setDocumentMargin(0)
-        self.setHtml(render_markdown_document(markdown))
+        self.document().setDefaultStyleSheet(markdown_css())
+        self.setHtml(render_markdown_fragment(markdown))
         self.sync_height_to_document()
 
     def resizeEvent(self, event) -> None:  # type: ignore[override]
@@ -171,6 +186,34 @@ def create_markdown_message_view(markdown: str) -> QWidget:
     if webengine_markdown_enabled() and QWebEngineView is not None:
         return WebMarkdownMessageView(markdown)  # type: ignore[name-defined]
     return TextMarkdownMessageView(markdown)
+
+
+class ChatMessageCard(QFrame):
+    def __init__(self, role: str, text: str, parent: QWidget | None = None) -> None:
+        super().__init__(parent)
+        self.role = "assistant" if role == "assistant" else "user"
+        self.setObjectName("chatMessageCardAssistant" if self.role == "assistant" else "chatMessageCardUser")
+        self.setMaximumWidth(880 if self.role == "assistant" else 700)
+        self.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Maximum)
+        layout = QVBoxLayout(self)
+        layout.setContentsMargins(14, 12, 14, 12)
+        layout.setSpacing(7)
+
+        header = QHBoxLayout()
+        header.setContentsMargins(0, 0, 0, 0)
+        header.setSpacing(8)
+        role_label = styled_label("导师" if self.role == "assistant" else "你", "chatRole")
+        header.addWidget(role_label, 0)
+        header.addStretch(1)
+        layout.addLayout(header)
+
+        if self.role == "assistant":
+            layout.addWidget(create_markdown_message_view(text), 1)
+        else:
+            message_label = styled_label(text, "chatText", True)
+            message_label.setTextFormat(Qt.TextFormat.PlainText)
+            message_label.setTextInteractionFlags(Qt.TextInteractionFlag.TextSelectableByMouse)
+            layout.addWidget(message_label)
 
 
 def make_hairline() -> QFrame:
@@ -855,11 +898,12 @@ class ChatDialog(QDialog):
         self.history_scroll.setWidgetResizable(True)
         self.history_scroll.setWidget(self.history_content)
 
-        self.text_edit = QTextEdit()
+        self.text_edit = ChatInputEdit()
         self.text_edit.setObjectName("chatInput")
         self.text_edit.setPlaceholderText("告诉桌宠你的目标、卡点，或输入 / 命令调用工具")
         self.text_edit.setMinimumHeight(64)
         self.text_edit.setMaximumHeight(96)
+        self.text_edit.submitted.connect(self.submit_message)
         enable_text_input(self.text_edit)
         enable_text_input(self.session_search)
 
@@ -1212,28 +1256,14 @@ class ChatDialog(QDialog):
         row_layout.setContentsMargins(0, 0, 0, 0)
         row_layout.setSpacing(10)
 
-        bubble = QFrame()
-        bubble.setObjectName("chatBubbleUser" if role == "user" else "chatBubbleAssistant")
-        bubble.setMaximumWidth(840 if role == "assistant" else 680)
-        bubble_layout = QVBoxLayout(bubble)
-        bubble_layout.setContentsMargins(14, 10, 14, 10)
-        bubble_layout.setSpacing(0)
-
-        if role == "assistant":
-            message_view = create_markdown_message_view(text)
-            bubble_layout.addWidget(message_view)
-        else:
-            message_label = styled_label(text, "chatText", True)
-            message_label.setTextFormat(Qt.TextFormat.PlainText)
-            message_label.setTextInteractionFlags(Qt.TextInteractionFlag.TextSelectableByMouse)
-            bubble_layout.addWidget(message_label)
+        card = ChatMessageCard(role, text)
 
         if role == "user":
             row_layout.addStretch(1)
-            row_layout.addWidget(bubble, 0)
+            row_layout.addWidget(card, 0)
         else:
             row_layout.addWidget(self.assistant_avatar(), 0, Qt.AlignmentFlag.AlignTop)
-            row_layout.addWidget(bubble, 1)
+            row_layout.addWidget(card, 1)
             row_layout.addStretch(1)
         self.history_layout.addWidget(row)
         self.message_widgets.append(row)

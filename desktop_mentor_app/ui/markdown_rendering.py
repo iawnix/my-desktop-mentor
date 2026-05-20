@@ -82,6 +82,60 @@ def _replace_math_in_text(text: str, add_replacement: Callable[[str, bool], str]
     return _INLINE_MATH_RE.sub(inline_replacer, text)
 
 
+def _render_inline_fallback(text: str) -> str:
+    escaped = html.escape(text)
+    escaped = re.sub(r"`([^`]+)`", r"<code>\1</code>", escaped)
+    escaped = re.sub(r"\*\*([^*]+)\*\*", r"<strong>\1</strong>", escaped)
+    return escaped
+
+
+def _flush_paragraph(lines: list[str], blocks: list[str]) -> None:
+    if not lines:
+        return
+    paragraph = " ".join(line.strip() for line in lines if line.strip())
+    if paragraph:
+        blocks.append(f"<p>{_render_inline_fallback(paragraph)}</p>")
+    lines.clear()
+
+
+def _render_markdown_fallback(markdown: str) -> str:
+    blocks: list[str] = []
+    paragraph_lines: list[str] = []
+    lines = markdown.splitlines()
+    index = 0
+    while index < len(lines):
+        line = lines[index]
+        fence_match = _FENCE_RE.match(line)
+        if fence_match:
+            _flush_paragraph(paragraph_lines, blocks)
+            fence = fence_match.group(1)
+            language = line[fence_match.end() :].strip()
+            code_lines: list[str] = []
+            index += 1
+            while index < len(lines):
+                end_match = _FENCE_RE.match(lines[index])
+                if end_match and end_match.group(1).startswith(fence[0]):
+                    break
+                code_lines.append(lines[index])
+                index += 1
+            blocks.append(_highlight_code("\n".join(code_lines), language))
+        elif not line.strip():
+            _flush_paragraph(paragraph_lines, blocks)
+        elif line.lstrip().startswith(("- ", "* ")):
+            _flush_paragraph(paragraph_lines, blocks)
+            items: list[str] = []
+            while index < len(lines) and lines[index].lstrip().startswith(("- ", "* ")):
+                items.append(f"<li>{_render_inline_fallback(lines[index].lstrip()[2:].strip())}</li>")
+                index += 1
+            blocks.append(f"<ul>{''.join(items)}</ul>")
+            continue
+        else:
+            paragraph_lines.append(line)
+        index += 1
+    _flush_paragraph(paragraph_lines, blocks)
+    return "\n".join(blocks)
+
+
 def _extract_math(markdown: str) -> tuple[str, list[MathReplacement]]:
     replacements: list[MathReplacement] = []
 
@@ -138,7 +192,7 @@ def _render_markdown(markdown: str) -> str:
         )
         rendered = renderer.render(protected_markdown)
     except Exception:
-        rendered = f"<p>{html.escape(protected_markdown).replace(chr(10), '<br>')}</p>"
+        rendered = _render_markdown_fallback(protected_markdown)
 
     for placeholder, replacement, display in math_replacements:
         if display:

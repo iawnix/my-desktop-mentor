@@ -147,6 +147,7 @@ python3 desktop_mentor.py --load-sticker-dir /path/to/stickers
 - 本地会话历史负责保存、搜索和切换多个会话。
 - 模型上下文只决定本次请求是否携带当前会话内容给 agent。
 - 模型回复使用 HTML Markdown 渲染，支持代码高亮、表格和 LaTeX 公式；用户输入按普通文本显示。
+- 输入框按 Enter 发送消息，Shift+Enter 插入换行。
 
 关闭 `使用当前会话上下文` 后，本次输入会进入新的独立会话；旧会话仍保留在本地历史中。
 
