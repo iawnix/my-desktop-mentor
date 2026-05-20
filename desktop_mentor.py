@@ -22,7 +22,7 @@ from PySide6.QtWidgets import QApplication
 
 from desktop_mentor_app.assets import DEFAULT_IMAGE, convert_image_to_ico, ensure_default_icon
 from desktop_mentor_app.config_store import chat_history_path, load_config, memory_path, save_config, todos_path
-from desktop_mentor_app.control.audit_log import audit_log_path
+from desktop_mentor_app.security.audit import audit_log_path
 from desktop_mentor_app.core.runtime import run_qt_app
 from desktop_mentor_app.constants import APP_NAME, DEFAULT_CLICK_MESSAGE, DEFAULT_PET_SIZE
 from desktop_mentor_app.idle_detector import idle_detection_diagnostics

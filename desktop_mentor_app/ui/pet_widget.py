@@ -8,19 +8,18 @@ import time
 from pathlib import Path
 
 from PySide6.QtCore import QObject, QPoint, QPointF, QRect, QRectF, QTimer, Qt, QEvent, Signal
-from PySide6.QtGui import QAction, QColor, QContextMenuEvent, QFont, QGuiApplication, QIcon, QImage, QMouseEvent, QPainter, QPainterPath, QPen, QPixmap, QFontMetrics
+from PySide6.QtGui import QAction, QColor, QContextMenuEvent, QFont, QGuiApplication, QIcon, QMouseEvent, QPainter, QPainterPath, QPen, QPixmap, QFontMetrics
 from PySide6.QtWidgets import QApplication, QDialog, QMenu, QWidget
 
-from ..agent_client import call_agent_async, compact_text
+from ..agent_client import compact_text
 from ..assets import DEFAULT_IMAGE, convert_image_to_ico, ensure_default_icon, icon_cache_path_for_image
 from ..config_store import config_path, load_config, save_config, save_config_directory
 from ..control import ControlPlan
 from ..core.task_runner import AsyncTaskRunner
-from ..cron.scheduler import reschedule_due_items
-from ..pet.animation import normalized_sticker_speed, sticker_frame_interval_seconds
+from ..pet.chat_manager import PetConversationService
+from ..pet.sticker_manager import StickerAnimationManager
+from ..pet.todo_manager import PetTodoService
 from ..state.conversations import (
-    append_chat_turn,
-    build_conversation_memory_context,
     clear_chat_history,
     create_conversation_session,
     ensure_active_session,
@@ -29,7 +28,6 @@ from ..state.conversations import (
     load_chat_history,
     set_active_session,
 )
-from ..state.memory import append_memory_turn
 from ..constants import (
     DEFAULT_CLICK_MESSAGE,
     DEFAULT_DROP_MESSAGE,
@@ -37,24 +35,19 @@ from ..constants import (
     DEFAULT_IDLE_SECONDS,
     DEFAULT_MESSAGE_SECONDS,
     MAX_PET_SIZE,
-    DEFAULT_TODO_REPEAT_SECONDS,
     IDLE_CHECK_INTERVAL_MS,
     IDLE_MODE_FULLSCREEN,
     MAX_MESSAGE_SECONDS,
-    MAX_TODO_REPEAT_SECONDS,
     MIN_IDLE_SECONDS,
     MIN_MESSAGE_SECONDS,
     MIN_PET_SIZE,
-    MIN_TODO_REPEAT_SECONDS,
     STICKER_ACTION_ALERT,
     STICKER_ACTION_DRAG,
     STICKER_ACTION_DROP_FILE,
     STICKER_ACTION_ERROR,
-    STICKER_ACTION_IDLE,
     STICKER_ACTION_SPEAKING,
     STICKER_ACTION_TAP,
     STICKER_ACTION_THINKING,
-    STICKER_ACTIONS,
     TODO_CHECK_INTERVAL_MS,
 )
 from .tokens import (
@@ -73,14 +66,11 @@ from .tokens import (
     BUBBLE_TEXT_PAD_X,
     BUBBLE_TEXT_PAD_Y,
     BUBBLE_TOP,
-    CHAT_BUTTON_MAX_SIZE,
-    CHAT_BUTTON_MIN_SIZE,
     DRAG_RELEASE_EFFECT_DURATION,
     DROP_EFFECT_DURATION,
     DROP_HOTZONE_PAD,
     FULLSCREEN_ALERT_DURATION_MS,
     MAX_BUBBLE_TEXT_CHARS,
-    STICKER_ALPHA_THRESHOLD,
     TODO_BUBBLE_GAP,
     TODO_BUBBLE_MAX_HEIGHT,
     TODO_BUBBLE_MAX_VISIBLE,
@@ -95,9 +85,8 @@ from .tokens import (
 from ..drop_context import collect_drop_context, compose_prompt_with_drop_context
 from ..idle_detector import idle_detection_diagnostics, system_idle_seconds
 from ..stickers import normalize_sticker_sets
-from ..state.todos import due_todos, load_todos, remove_todos_by_ids, save_todos
-from ..tools.executor import execute_control_plan_async
-from ..tools.registry import build_control_plan, build_control_plan_from_agent_reply
+from ..state.todos import load_todos, save_todos
+from ..tools.registry import build_control_plan
 from .dialogs import ChatDialog, FullScreenIdleAlert, SettingsDialog, TextViewDialog, TodoDialog, prepare_modern_menu
 
 LOGGER = logging.getLogger(__name__)
@@ -209,14 +198,7 @@ class DesktopMentorPet(QWidget):
             self.image_path = image_path
             self.pixmap = fallback_pixmap
             self.config.image_path = str(image_path)
-        self.sticker_frames: dict[str, list[QPixmap]] = {}
-        self.sticker_source_rects: dict[str, QRectF] = {}
-        self.pixmap_content_rect_cache: dict[int, QRectF] = {}
-        self.current_action = STICKER_ACTION_IDLE
-        self.action_until = 0.0
-        self.action_loop = True
-        self.frame_index = 0
-        self.last_frame_at = time.monotonic()
+        self.sticker_animation = StickerAnimationManager(self.pixmap)
         self.fullscreen_alert: FullScreenIdleAlert | None = None
         self.chat_dialog: ChatDialog | None = None
         self.icon_error = self.refresh_window_icon()
@@ -252,6 +234,8 @@ class DesktopMentorPet(QWidget):
         self.agent_signals.error_ready.connect(self.show_agent_error)
         self.agent_signals.control_plan_ready.connect(self.show_agent_control_request)
         self.task_runner = AsyncTaskRunner(self)
+        self.chat_service = PetConversationService()
+        self.todo_service = PetTodoService()
         self.task_runner.task_error.connect(lambda text: self.agent_signals.error_ready.emit(text, ""))
         self.destroyed.connect(lambda _obj=None: self.task_runner.shutdown())
 
@@ -296,181 +280,66 @@ class DesktopMentorPet(QWidget):
             return False
         self.image_path = image_path
         self.pixmap = pixmap
+        self.sticker_animation.set_base_pixmap(pixmap)
         self.update()
         return True
 
+    @property
+    def current_action(self) -> str:
+        return self.sticker_animation.current_action
+
     def reload_sticker_sets(self) -> list[str]:
         self.config.sticker_sets = normalize_sticker_sets(self.config.sticker_sets)
-        frames: dict[str, list[QPixmap]] = {}
-        invalid_paths: list[str] = []
-        for action, paths in self.config.sticker_sets.items():
-            loaded: list[QPixmap] = []
-            for raw_path in paths:
-                image_path = Path(raw_path).expanduser()
-                pixmap = QPixmap(str(image_path))
-                if pixmap.isNull():
-                    invalid_paths.append(f"{action}: {raw_path}")
-                    continue
-                loaded.append(pixmap)
-            if loaded:
-                frames[action] = loaded
-        self.sticker_frames = frames
-        self.sticker_source_rects = {
-            action: self.action_union_source_rect(loaded_frames)
-            for action, loaded_frames in frames.items()
-        }
-        self.frame_index = 0
-        self.last_frame_at = time.monotonic()
-        if any(len(items) > 1 for items in self.sticker_frames.values()):
+        invalid_paths = self.sticker_animation.reload(self.config.sticker_sets)
+        if self.sticker_animation.has_multi_frame_action():
             self.ensure_animation_timer()
         self.update()
         return invalid_paths
 
     def sticker_frame_counts(self) -> dict[str, int]:
-        return {action: len(self.sticker_frames.get(action, [])) for action in STICKER_ACTIONS}
+        return self.sticker_animation.frame_counts()
 
     def action_frames(self, action: str) -> list[QPixmap]:
-        return self.sticker_frames.get(action) or self.sticker_frames.get(STICKER_ACTION_IDLE) or [self.pixmap]
+        return self.sticker_animation.action_frames(action)
 
     def current_sticker_pixmap(self) -> QPixmap:
-        frames = self.action_frames(self.current_action)
-        if not frames:
-            return self.pixmap
-        return frames[self.frame_index % len(frames)]
+        return self.sticker_animation.current_pixmap()
 
     def action_source_rect(self, action: str) -> QRectF:
-        if action in self.sticker_frames:
-            return QRectF(self.sticker_source_rects.get(action) or QRectF(self.action_frames(action)[0].rect()))
-        if STICKER_ACTION_IDLE in self.sticker_frames:
-            return QRectF(self.sticker_source_rects.get(STICKER_ACTION_IDLE) or QRectF(self.action_frames(STICKER_ACTION_IDLE)[0].rect()))
-        return self.pixmap_content_rect(self.pixmap)
+        return self.sticker_animation.action_source_rect(action)
 
     def current_sticker_source_rect(self) -> QRectF:
-        return self.action_source_rect(self.current_action)
+        return self.sticker_animation.current_source_rect()
 
     def action_union_source_rect(self, frames: list[QPixmap]) -> QRectF:
-        union_rect = QRectF()
-        for pixmap in frames:
-            rect = self.pixmap_content_rect(pixmap)
-            union_rect = QRectF(rect) if union_rect.isNull() else union_rect.united(rect)
-        if union_rect.isNull() and frames:
-            return QRectF(frames[0].rect())
-        return union_rect
+        return self.sticker_animation.action_union_source_rect(frames)
 
     def pixmap_content_rect(self, pixmap: QPixmap) -> QRectF:
-        if pixmap.isNull():
-            return QRectF()
-        key = int(pixmap.cacheKey())
-        cached = self.pixmap_content_rect_cache.get(key)
-        if cached is not None:
-            return QRectF(cached)
-
-        image = pixmap.toImage().convertToFormat(QImage.Format.Format_RGBA8888)
-        width = image.width()
-        height = image.height()
-        if width <= 0 or height <= 0:
-            rect = QRectF(pixmap.rect())
-        else:
-            scan_limit = 256
-            if max(width, height) > scan_limit:
-                ratio = scan_limit / max(width, height)
-                scan_width = max(1, int(width * ratio))
-                scan_height = max(1, int(height * ratio))
-                scan_image = image.scaled(
-                    scan_width,
-                    scan_height,
-                    Qt.AspectRatioMode.IgnoreAspectRatio,
-                    Qt.TransformationMode.FastTransformation,
-                ).convertToFormat(QImage.Format.Format_RGBA8888)
-            else:
-                scan_image = image
-                scan_width = width
-                scan_height = height
-
-            bits = scan_image.constBits()
-            bytes_per_line = scan_image.bytesPerLine()
-            left = scan_width
-            right = -1
-            top = scan_height
-            bottom = -1
-            for y in range(scan_height):
-                alpha_row = bits[y * bytes_per_line + 3 : y * bytes_per_line + 3 + scan_width * 4 : 4]
-                row_left = -1
-                row_right = -1
-                for x, alpha in enumerate(alpha_row):
-                    if alpha > STICKER_ALPHA_THRESHOLD:
-                        if row_left < 0:
-                            row_left = x
-                        row_right = x
-                if row_left >= 0:
-                    left = min(left, row_left)
-                    right = max(right, row_right)
-                    if top == scan_height:
-                        top = y
-                    bottom = y
-            if right >= left and bottom >= top:
-                scale_x = width / max(1, scan_width)
-                scale_y = height / max(1, scan_height)
-                source_left = max(0, int(left * scale_x) - 2)
-                source_top = max(0, int(top * scale_y) - 2)
-                source_right = min(width, int((right + 1) * scale_x) + 2)
-                source_bottom = min(height, int((bottom + 1) * scale_y) + 2)
-                rect = QRectF(source_left, source_top, source_right - source_left, source_bottom - source_top)
-            else:
-                rect = QRectF(pixmap.rect())
-        self.pixmap_content_rect_cache[key] = QRectF(rect)
-        return rect
+        return self.sticker_animation.pixmap_content_rect(pixmap)
 
     def ensure_animation_timer(self) -> None:
         if not self.pulse_timer.isActive():
             self.pulse_timer.start()
 
     def sticker_animation_speed(self) -> float:
-        return normalized_sticker_speed(self.config.sticker_animation_speed)
+        return self.sticker_animation.animation_speed(self.config.sticker_animation_speed)
 
     def sticker_frame_interval_seconds(self) -> float:
-        return sticker_frame_interval_seconds(self.config.sticker_animation_speed)
+        return self.sticker_animation.frame_interval_seconds(self.config.sticker_animation_speed)
 
     def play_action(self, action: str, *, duration: float = 0.0, loop: bool = True, restart: bool = True) -> None:
-        if action not in STICKER_ACTIONS:
-            action = STICKER_ACTION_IDLE
-        now = time.monotonic()
-        if restart or action != self.current_action:
-            self.frame_index = 0
-            self.last_frame_at = now
-        self.current_action = action
-        self.action_loop = loop
-        self.action_until = now + duration if duration > 0 else 0.0
+        self.sticker_animation.play_action(action, duration=duration, loop=loop, restart=restart)
         self.ensure_animation_timer()
         self.update()
 
     def update_active_action(self, now: float) -> None:
-        if self.current_action != STICKER_ACTION_IDLE and self.action_until > 0 and now >= self.action_until:
-            self.current_action = STICKER_ACTION_IDLE
-            self.action_loop = True
-            self.action_until = 0.0
-            self.frame_index = 0
-            self.last_frame_at = now
+        self.sticker_animation.update_active_action(now)
 
     def advance_sticker_frame(self, now: float) -> None:
-        frames = self.action_frames(self.current_action)
-        if len(frames) <= 1:
-            return
-        interval = self.sticker_frame_interval_seconds()
-        elapsed = now - self.last_frame_at
-        if elapsed < interval:
-            return
-        steps = max(1, int(elapsed / interval))
-        if self.action_loop:
-            self.frame_index = (self.frame_index + steps) % len(frames)
-        else:
-            self.frame_index = min(len(frames) - 1, self.frame_index + steps)
-        self.last_frame_at += steps * interval
+        self.sticker_animation.advance_frame(now, self.config.sticker_animation_speed)
 
     def has_active_sticker_animation(self, now: float) -> bool:
-        if len(self.action_frames(self.current_action)) > 1:
-            return True
-        return self.current_action != STICKER_ACTION_IDLE and (self.action_until <= 0 or now < self.action_until)
+        return self.sticker_animation.has_active_animation(now)
 
     def refresh_window_icon(self) -> str:
         try:
@@ -602,7 +471,7 @@ class DesktopMentorPet(QWidget):
             return
         if self.todo_bubbles:
             return
-        if any(int(todo["due_ts"]) <= int(time.time()) for todo in load_todos()):
+        if self.todo_service.has_due_items():
             return
         idle_seconds = max(MIN_IDLE_SECONDS, int(self.config.idle_seconds or DEFAULT_IDLE_SECONDS))
         idle_for = system_idle_seconds()
@@ -920,13 +789,7 @@ class DesktopMentorPet(QWidget):
         return ""
 
     def todo_repeat_seconds(self) -> int:
-        try:
-            return max(
-                MIN_TODO_REPEAT_SECONDS,
-                min(MAX_TODO_REPEAT_SECONDS, int(self.config.todo_repeat_seconds or DEFAULT_TODO_REPEAT_SECONDS)),
-            )
-        except Exception:
-            return DEFAULT_TODO_REPEAT_SECONDS
+        return self.todo_service.repeat_seconds(self.config.todo_repeat_seconds)
 
     def add_todo_bubble(self, todo: dict[str, object]) -> None:
         self.todo_bubbles.append(
@@ -948,15 +811,14 @@ class DesktopMentorPet(QWidget):
         if not todo_id:
             return
         self.mark_interaction()
-        todos = remove_todos_by_ids(load_todos(), [todo_id])
-        save_todos(todos)
+        self.todo_service.acknowledge(todo_id)
         self.todo_bubbles = [bubble for bubble in self.todo_bubbles if str(bubble["todo_id"]) != todo_id]
         self.recalculate_todo_stack_layout()
         self.idle_suppressed_until = time.monotonic() + 6.0
         self.update()
 
     def sync_todo_bubbles_with_store(self) -> None:
-        todo_ids = {str(todo["id"]) for todo in load_todos()}
+        todo_ids = self.todo_service.active_ids()
         if not self.todo_bubbles:
             return
         self.todo_bubbles = [bubble for bubble in self.todo_bubbles if str(bubble["todo_id"]) in todo_ids]
@@ -1351,16 +1213,11 @@ class DesktopMentorPet(QWidget):
         self.show_bubble(f"待办已保存：{path}", duration=self.message_duration())
 
     def check_todos(self) -> None:
-        now_ts = int(time.time())
-        todos = load_todos()
-        due = due_todos(todos, now_ts)
+        due = self.todo_service.pop_due_reminders(repeat_seconds=self.todo_repeat_seconds())
         if not due:
             return
-        repeat_seconds = self.todo_repeat_seconds()
-        due, remaining = reschedule_due_items(todos, now_ts=now_ts, repeat_seconds=repeat_seconds)
         for todo in due:
             self.add_todo_bubble(todo)
-        save_todos(remaining)
         if self.fullscreen_alert is not None:
             self.fullscreen_alert.close()
         self.idle_suppressed_until = time.monotonic() + max(8.0, self.message_duration() + 3.0)
@@ -1441,11 +1298,7 @@ class DesktopMentorPet(QWidget):
         session_id: str,
         use_conversation_context: bool,
     ):
-        active_session = get_session(session_id) or ensure_active_session()
-        if use_conversation_context or active_session.message_count == 0:
-            set_active_session(active_session.session_id)
-            return active_session
-        return create_conversation_session(user_prompt)
+        return self.chat_service.session_for_context_policy(user_prompt, session_id, use_conversation_context)
 
     def show_user_message_for_session(self, user_prompt: str, session_id: str) -> None:
         if self.chat_dialog is None:
@@ -1524,10 +1377,7 @@ class DesktopMentorPet(QWidget):
             self.chat_dialog.show()
             self.chat_dialog.raise_()
             self.chat_dialog.activate_for_input()
-        try:
-            append_chat_turn(user_prompt, plan.summary() + "\n\n等待用户确认。", session_id)
-        except Exception:
-            pass
+        self.chat_service.record_control_plan_waiting(user_prompt, plan, session_id)
         self.refresh_chat_dialog_sessions()
         self.show_bubble("电脑操作需要确认。", duration=self.message_duration(), action=STICKER_ACTION_THINKING)
 
@@ -1548,11 +1398,7 @@ class DesktopMentorPet(QWidget):
         if pending is None:
             return
         plan, _user_prompt, session_id = pending
-        reply = f"已取消电脑操作：{plan.title}"
-        try:
-            append_chat_turn(f"取消电脑操作：{plan.title}", reply, session_id)
-        except Exception:
-            pass
+        reply = self.chat_service.record_control_plan_cancelled(plan, session_id)
         self.agent_signals.reply_ready.emit(reply, session_id)
 
     def queue_control_reply(self, plan: ControlPlan, memory_prompt: str, session_id: str) -> None:
@@ -1565,26 +1411,15 @@ class DesktopMentorPet(QWidget):
         )
 
     async def fetch_control_reply(self, plan: ControlPlan, memory_prompt: str, session_id: str) -> None:
-        try:
-            result = await execute_control_plan_async(plan)
-            reply = result.display_text()
-        except Exception as exc:
-            LOGGER.exception("control execution failed")
-            reply = f"电脑操作出错：{type(exc).__name__}: {exc}"
-            try:
-                append_chat_turn(memory_prompt, reply, session_id)
-            except Exception:
-                pass
-            self.agent_signals.error_ready.emit(reply, session_id)
-            return
-        try:
-            append_chat_turn(memory_prompt, reply, session_id)
-        except Exception:
-            pass
+        result = await self.chat_service.execute_control_plan_reply(
+            plan,
+            memory_prompt=memory_prompt,
+            session_id=session_id,
+        )
         if result.ok:
-            self.agent_signals.reply_ready.emit(reply, session_id)
+            self.agent_signals.reply_ready.emit(result.text, result.session_id)
         else:
-            self.agent_signals.error_ready.emit(reply, session_id)
+            self.agent_signals.error_ready.emit(result.text, result.session_id)
 
     def ask_about_dropped_files(self) -> None:
         self.mark_interaction()
@@ -1654,58 +1489,25 @@ class DesktopMentorPet(QWidget):
         session_id: str = "",
         use_conversation_context: bool = True,
     ) -> None:
-        session = get_session(session_id) or ensure_active_session()
-        agent_prompt = prompt
-        if use_conversation_context:
-            try:
-                memory_context = build_conversation_memory_context(session.session_id, self.config.memory_turns)
-            except Exception:
-                memory_context = ""
-            if memory_context:
-                agent_prompt = f"{memory_context}\n\n当前输入:\n{prompt}"
-        try:
-            reply = await call_agent_async(
-                self.config,
-                agent_prompt,
-                include_legacy_memory=bool(use_conversation_context and self.config.memory_enabled),
+        result = await self.chat_service.fetch_agent_reply(
+            self.config,
+            prompt,
+            memory_prompt=memory_prompt,
+            session_id=session_id,
+            use_conversation_context=use_conversation_context,
+        )
+        if result.control_plan is not None:
+            self.agent_signals.control_plan_ready.emit(
+                result.control_plan,
+                result.text,
+                result.control_source_text,
+                result.session_id,
             )
-        except Exception as exc:
-            LOGGER.exception("agent reply failed")
-            reply = f"Agent 出错：{type(exc).__name__}: {exc}"
-            try:
-                append_chat_turn(memory_prompt or prompt, reply, session.session_id)
-            except Exception:
-                pass
-            self.agent_signals.error_ready.emit(reply, session.session_id)
             return
-        if self.config.control_enabled:
-            try:
-                control_plan, cleaned_reply = build_control_plan_from_agent_reply(reply, self.config.control_workspace)
-            except Exception:
-                control_plan, cleaned_reply = None, reply
-            if control_plan is not None:
-                if cleaned_reply:
-                    try:
-                        append_chat_turn(memory_prompt or prompt, cleaned_reply, session.session_id)
-                    except Exception:
-                        pass
-                self.agent_signals.control_plan_ready.emit(
-                    control_plan,
-                    cleaned_reply,
-                    control_plan.source_text,
-                    session.session_id,
-                )
-                return
-        try:
-            append_chat_turn(memory_prompt or prompt, reply, session.session_id)
-        except Exception:
-            pass
-        if use_conversation_context and self.config.memory_enabled:
-            try:
-                append_memory_turn(memory_prompt or prompt, reply)
-            except Exception:
-                pass
-        self.agent_signals.reply_ready.emit(reply, session.session_id)
+        if result.is_error:
+            self.agent_signals.error_ready.emit(result.text, result.session_id)
+            return
+        self.agent_signals.reply_ready.emit(result.text, result.session_id)
 
     def set_pet_size(self, size: int) -> None:
         old_center = self.sticker_center_global()

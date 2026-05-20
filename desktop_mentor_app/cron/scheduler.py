@@ -1,7 +1,7 @@
 """Reminder scheduling helpers."""
 from __future__ import annotations
 
-from ..todo_store import due_todos, future_todos, remove_todos_by_ids, rescheduled_todo
+from ..state.todos import due_todos, future_todos, remove_todos_by_ids, rescheduled_todo
 
 
 def reschedule_due_items(

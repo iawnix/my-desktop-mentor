@@ -41,7 +41,7 @@ except Exception:
 from ..agent_client import compact_text
 from ..assets import DEFAULT_IMAGE, TODO_BADGE_IMAGE
 from ..config_store import AgentConfig, config_path
-from ..conversation_store import ChatHistoryMessage, ConversationSession, format_session_time
+from ..state.conversations import ChatHistoryMessage, ConversationSession, format_session_time
 from ..constants import (
     APP_NAME,
     DEFAULT_CONTROL_ENABLED,
@@ -73,7 +73,7 @@ from ..constants import (
     STICKER_IMAGE_FILTER,
 )
 from ..stickers import discover_sticker_sets, normalize_sticker_sets
-from ..todo_store import format_due_time, load_todos_from_items
+from ..state.todos import format_due_time, load_todos_from_items
 from .markdown_rendering import markdown_css, render_markdown_document, render_markdown_fragment
 from .theme import apply_app_theme
 from .tokens import FULLSCREEN_ALERT_DURATION_MS

@@ -80,6 +80,9 @@ step "Python syntax"
   desktop_mentor_app/platforms/whatsapp.py \
   desktop_mentor_app/pet/__init__.py \
   desktop_mentor_app/pet/animation.py \
+  desktop_mentor_app/pet/chat_manager.py \
+  desktop_mentor_app/pet/sticker_manager.py \
+  desktop_mentor_app/pet/todo_manager.py \
   desktop_mentor_app/config_store.py \
   desktop_mentor_app/input_method.py \
   desktop_mentor_app/control/__init__.py \
@@ -152,20 +155,22 @@ from desktop_mentor_app import config_store
 from desktop_mentor_app.agent_client import agent_system_prompt, call_agent_async, compact_text, limit_formatted_text
 from desktop_mentor_app.assets import DEFAULT_IMAGE, DEFAULT_STICKERS_DIR, ROOT
 from desktop_mentor_app.config_store import AgentConfig, new_default_config
-from desktop_mentor_app.control import PermissionLevel, build_control_plan, build_control_plan_from_agent_reply, execute_control_plan
-from desktop_mentor_app.control.tool_registry import desktop_path
-from desktop_mentor_app.conversation_store import append_chat_turn, build_conversation_memory_context, clear_chat_history, create_conversation_session, load_chat_history, list_conversation_sessions
-from desktop_mentor_app.constants import DEFAULT_CLICK_MESSAGE, DEFAULT_STICKER_ANIMATION_SPEED, MAX_IDLE_SECONDS, MAX_PET_SIZE, MAX_STICKER_ANIMATION_SPEED, MIN_PET_SIZE, STICKER_ACTION_IDLE, STICKER_ACTION_TAP
+from desktop_mentor_app.control import PermissionLevel
+from desktop_mentor_app.state.conversations import append_chat_turn, build_conversation_memory_context, clear_chat_history, create_conversation_session, load_chat_history, list_conversation_sessions
+from desktop_mentor_app.tools.executor import execute_control_plan
+from desktop_mentor_app.tools.registry import build_control_plan, build_control_plan_from_agent_reply, desktop_path
+from desktop_mentor_app.constants import DEFAULT_CLICK_MESSAGE, DEFAULT_STICKER_ANIMATION_SPEED, DEFAULT_TODO_REPEAT_SECONDS, MAX_IDLE_SECONDS, MAX_PET_SIZE, MAX_STICKER_ANIMATION_SPEED, MIN_PET_SIZE, STICKER_ACTION_IDLE, STICKER_ACTION_TAP
 from desktop_mentor_app.drop_context import DROP_CONTEXT_PROMPT_HEADER, collect_drop_context, compose_prompt_with_drop_context
 from desktop_mentor_app.input_method import configure_linux_input_method_environment, fcitx_qt_plugin_files, input_method_diagnostics, preferred_x11_display
 from desktop_mentor_app.stickers import discover_sticker_sets
-from desktop_mentor_app.todo_store import load_todos, save_todos
+from desktop_mentor_app.state.todos import load_todos, save_todos
 from desktop_mentor_app.ui.dialogs import ChatDialog, SettingsDialog, TodoDialog, prepare_modern_menu
 from desktop_mentor_app.ui.markdown_rendering import normalize_model_markdown, render_markdown_fragment
 from desktop_mentor_app.ui.pet_widget import DesktopMentorPet
 from desktop_mentor_app.config.migration import CURRENT_CONFIG_SCHEMA_VERSION
 from desktop_mentor_app.cron.scheduler import reschedule_due_items
 from desktop_mentor_app.pet.animation import sticker_frame_interval_seconds
+from desktop_mentor_app.pet.todo_manager import PetTodoService
 from desktop_mentor_app.platforms.whatsapp import WhatsAppPlatform
 
 app = QApplication([])
@@ -174,6 +179,7 @@ settings = SettingsDialog(AgentConfig())
 default_config = new_default_config()
 assert default_config.schema_version == CURRENT_CONFIG_SCHEMA_VERSION
 assert default_config.sticker_animation_speed == DEFAULT_STICKER_ANIMATION_SPEED, default_config.sticker_animation_speed
+assert PetTodoService().repeat_seconds("bad") == DEFAULT_TODO_REPEAT_SECONDS
 assert settings.sticker_animation_speed_spin.value() == DEFAULT_STICKER_ANIMATION_SPEED, settings.sticker_animation_speed_spin.value()
 assert all(len(paths) == 16 for paths in default_config.sticker_sets.values()), default_config.sticker_sets
 assert len(default_config.sticker_sets) == 8, default_config.sticker_sets

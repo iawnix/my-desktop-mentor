@@ -159,8 +159,10 @@ python3 desktop_mentor.py --load-sticker-dir /path/to/stickers
 - `config/`、`state/`：版本化配置迁移、本地会话、记忆和待办状态。
 - `model_client/`：OpenAI-compatible 模型客户端。
 - `tools/`、`security/`：工具计划、执行、权限策略和审计。
-- `pet/`、`cron/`、`platforms/`：桌宠动画、提醒调度和消息平台接口骨架。
+- `pet/`、`cron/`、`platforms/`：桌宠动画、聊天/控制服务、提醒调度和消息平台接口骨架。
 - `ui/`：Qt 界面、Markdown 渲染和主题。
+
+旧的 `conversation_store.py`、`todo_store.py` 和 `control/*` 路径保留为兼容入口，真实实现位于 `state/`、`tools/` 和 `security/`。
 
 运行时日志写入配置目录下的：
 
