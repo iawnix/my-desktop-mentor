@@ -1,10 +1,11 @@
 """Dialog widgets for the desktop mentor."""
 from __future__ import annotations
 
+import os
 import time
 from pathlib import Path
 
-from PySide6.QtCore import QDateTime, QPoint, QRect, QRectF, QTimer, Qt, QEvent, Signal
+from PySide6.QtCore import QDateTime, QPoint, QRect, QRectF, QTimer, Qt, QEvent, QUrl, Signal
 from PySide6.QtGui import QColor, QFont, QGuiApplication, QMouseEvent, QPainter, QPen, QPixmap, QTextCursor, QBrush
 from PySide6.QtWidgets import (
     QCheckBox,
@@ -32,6 +33,10 @@ from PySide6.QtWidgets import (
     QVBoxLayout,
     QWidget,
 )
+try:
+    from PySide6.QtWebEngineWidgets import QWebEngineView
+except Exception:
+    QWebEngineView = None  # type: ignore[assignment]
 
 from ..agent_client import compact_text
 from ..assets import DEFAULT_IMAGE, TODO_BADGE_IMAGE
@@ -69,8 +74,9 @@ from ..constants import (
 )
 from ..stickers import discover_sticker_sets, normalize_sticker_sets
 from ..todo_store import format_due_time, load_todos_from_items
+from .markdown_rendering import render_markdown_document
 from .theme import apply_app_theme
-from .tokens import FLUENT_DARK_COLORS, FULLSCREEN_ALERT_DURATION_MS
+from .tokens import FULLSCREEN_ALERT_DURATION_MS
 
 
 
@@ -81,67 +87,20 @@ def styled_label(text: str, object_name: str, word_wrap: bool = False) -> QLabel
     return label
 
 
-def markdown_stylesheet() -> str:
-    colors = FLUENT_DARK_COLORS
-    return f"""
-body {{
-  color: {colors["text_primary"]};
-  font-size: 13px;
-  line-height: 1.38;
-  margin: 0;
-}}
-p {{
-  margin: 0 0 8px 0;
-}}
-h1, h2, h3, h4 {{
-  color: {colors["text_primary"]};
-  font-weight: 700;
-  margin: 8px 0 6px 0;
-}}
-ul, ol {{
-  margin: 4px 0 8px 0;
-  padding-left: 20px;
-}}
-li {{
-  margin: 2px 0;
-}}
-blockquote {{
-  color: {colors["text_secondary"]};
-  border-left: 3px solid {colors["accent"]};
-  margin: 6px 0;
-  padding-left: 10px;
-}}
-code {{
-  color: {colors["text_primary"]};
-  background-color: {colors["surface_control"]};
-  font-family: "SFMono-Regular", "SF Mono", Consolas, "Liberation Mono", monospace;
-}}
-pre {{
-  color: {colors["text_primary"]};
-  background-color: {colors["input"]};
-  border: 1px solid {colors["border_control"]};
-  border-radius: 6px;
-  margin: 6px 0 8px 0;
-  padding: 8px;
-}}
-a {{
-  color: {colors["focus"]};
-}}
-table {{
-  border-collapse: collapse;
-  margin: 6px 0 8px 0;
-}}
-th, td {{
-  border: 1px solid {colors["border_control"]};
-  padding: 4px 7px;
-}}
-"""
+def webengine_markdown_enabled() -> bool:
+    if QWebEngineView is None:
+        return False
+    disabled = os.environ.get("DESKTOP_MENTOR_DISABLE_WEBENGINE", "").lower()
+    if disabled in {"1", "true", "yes", "on"}:
+        return False
+    platform = os.environ.get("QT_QPA_PLATFORM", "").lower()
+    return "offscreen" not in platform and "minimal" not in platform
 
 
-class MarkdownMessageView(QTextBrowser):
+class TextMarkdownMessageView(QTextBrowser):
     def __init__(self, markdown: str, parent: QWidget | None = None) -> None:
         super().__init__(parent)
-        self.setObjectName("chatMarkdownText")
+        self.setObjectName("chatMarkdownMessage")
         self.setReadOnly(True)
         self.setOpenExternalLinks(True)
         self.setFrameShape(QFrame.Shape.NoFrame)
@@ -153,8 +112,7 @@ class MarkdownMessageView(QTextBrowser):
         )
         self.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Minimum)
         self.document().setDocumentMargin(0)
-        self.document().setDefaultStyleSheet(markdown_stylesheet())
-        self.setMarkdown(markdown)
+        self.setHtml(render_markdown_document(markdown))
         self.sync_height_to_document()
 
     def resizeEvent(self, event) -> None:  # type: ignore[override]
@@ -169,6 +127,50 @@ class MarkdownMessageView(QTextBrowser):
         width = max(1, self.viewport().width())
         self.document().setTextWidth(width)
         self.setFixedHeight(max(24, int(self.document().size().height()) + 4))
+
+
+if QWebEngineView is not None:
+
+    class WebMarkdownMessageView(QWebEngineView):  # type: ignore[misc, valid-type]
+        def __init__(self, markdown: str, parent: QWidget | None = None) -> None:
+            super().__init__(parent)
+            self.setObjectName("chatMarkdownMessage")
+            self.setAttribute(Qt.WidgetAttribute.WA_TranslucentBackground, True)
+            self.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Minimum)
+            self.page().setBackgroundColor(QColor(0, 0, 0, 0))
+            self.loadFinished.connect(self._on_load_finished)
+            self.setHtml(render_markdown_document(markdown), QUrl("about:blank"))
+            self.setFixedHeight(32)
+
+        def resizeEvent(self, event) -> None:  # type: ignore[override]
+            super().resizeEvent(event)
+            QTimer.singleShot(0, self.sync_height_to_document)
+
+        def _on_load_finished(self, _ok: bool) -> None:
+            self.sync_height_to_document()
+
+        def sync_height_to_document(self) -> None:
+            script = "Math.ceil(document.documentElement.scrollHeight || document.body.scrollHeight || 24)"
+            try:
+                self.page().runJavaScript(script, self._apply_document_height)
+            except RuntimeError:
+                return
+
+        def _apply_document_height(self, height: object) -> None:
+            try:
+                value = int(float(str(height)))
+            except (TypeError, ValueError):
+                value = 24
+            try:
+                self.setFixedHeight(max(24, value + 4))
+            except RuntimeError:
+                return
+
+
+def create_markdown_message_view(markdown: str) -> QWidget:
+    if webengine_markdown_enabled() and QWebEngineView is not None:
+        return WebMarkdownMessageView(markdown)  # type: ignore[name-defined]
+    return TextMarkdownMessageView(markdown)
 
 
 def make_hairline() -> QFrame:
@@ -1218,7 +1220,7 @@ class ChatDialog(QDialog):
         bubble_layout.setSpacing(0)
 
         if role == "assistant":
-            message_view = MarkdownMessageView(text)
+            message_view = create_markdown_message_view(text)
             bubble_layout.addWidget(message_view)
         else:
             message_label = styled_label(text, "chatText", True)

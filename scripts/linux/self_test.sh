@@ -114,7 +114,7 @@ import tempfile
 from pathlib import Path
 
 from PySide6.QtCore import Qt
-from PySide6.QtWidgets import QApplication, QFrame, QMenu, QPushButton, QScrollArea, QTextBrowser
+from PySide6.QtWidgets import QApplication, QFrame, QMenu, QPushButton, QScrollArea, QWidget
 
 from desktop_mentor_app import config_store
 from desktop_mentor_app.agent_client import agent_system_prompt
@@ -129,6 +129,7 @@ from desktop_mentor_app.input_method import configure_linux_input_method_environ
 from desktop_mentor_app.stickers import discover_sticker_sets
 from desktop_mentor_app.todo_store import load_todos, save_todos
 from desktop_mentor_app.ui.dialogs import ChatDialog, SettingsDialog, TodoDialog, prepare_modern_menu
+from desktop_mentor_app.ui.markdown_rendering import render_markdown_fragment
 from desktop_mentor_app.ui.pet_widget import DesktopMentorPet
 
 app = QApplication([])
@@ -141,10 +142,14 @@ assert all(len(paths) == 16 for paths in default_config.sticker_sets.values()), 
 assert len(default_config.sticker_sets) == 8, default_config.sticker_sets
 chat = ChatDialog()
 context_chat = ChatDialog(context_hint="文件上下文：README.md")
-chat.add_assistant_message("**结论**\n\n- Markdown 列表\n\n```python\nprint('ok')\n```")
-markdown_views = chat.findChildren(QTextBrowser, "chatMarkdownText")
-assert markdown_views, "assistant replies should render through MarkdownMessageView"
-assert "Markdown 列表" in markdown_views[-1].toPlainText(), markdown_views[-1].toPlainText()
+markdown_sample = "**结论**\n\n- Markdown 列表\n\n```python\nprint('ok')\n```\n\n$$E=mc^2$$"
+chat.add_assistant_message(markdown_sample)
+markdown_views = chat.findChildren(QWidget, "chatMarkdownMessage")
+assert markdown_views, "assistant replies should render through a Markdown message view"
+rendered_markdown = render_markdown_fragment(markdown_sample)
+assert "codehilite" in rendered_markdown, rendered_markdown
+assert "math-block" in rendered_markdown, rendered_markdown
+assert "<math" in rendered_markdown, rendered_markdown
 clear_chat_history()
 assert load_chat_history() == []
 managed_session = append_chat_turn("记住我的默认项目是导师桌宠", "已记住")
