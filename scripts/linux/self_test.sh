@@ -71,7 +71,11 @@ step "Python syntax"
   desktop_mentor_app/security/policy.py \
   desktop_mentor_app/tools/__init__.py \
   desktop_mentor_app/tools/base.py \
+  desktop_mentor_app/tools/command_parser.py \
   desktop_mentor_app/tools/executor.py \
+  desktop_mentor_app/tools/natural_language.py \
+  desktop_mentor_app/tools/path_parser.py \
+  desktop_mentor_app/tools/plan_helpers.py \
   desktop_mentor_app/tools/registry.py \
   desktop_mentor_app/cron/__init__.py \
   desktop_mentor_app/cron/scheduler.py \
@@ -99,9 +103,24 @@ step "Python syntax"
   desktop_mentor_app/idle_detector.py \
   desktop_mentor_app/drop_context.py \
   desktop_mentor_app/ui/tokens.py \
+  desktop_mentor_app/ui/chat_components.py \
+  desktop_mentor_app/ui/chat_dialog.py \
+  desktop_mentor_app/ui/dialog_chrome.py \
   desktop_mentor_app/ui/dialogs.py \
+  desktop_mentor_app/ui/idle_alert.py \
+  desktop_mentor_app/ui/pet_dialog_coordinator.py \
+  desktop_mentor_app/ui/pet_interaction_controller.py \
+  desktop_mentor_app/ui/pet_painter.py \
   desktop_mentor_app/ui/pet_widget.py \
+  desktop_mentor_app/ui/pointer_events.py \
+  desktop_mentor_app/ui/settings_dialog.py \
+  desktop_mentor_app/ui/sticker_set_editor.py \
+  desktop_mentor_app/ui/text_view_dialog.py \
+  desktop_mentor_app/ui/todo_dialog.py \
   packaging/windows/desktop_mentor.spec
+
+step "Unit tests"
+PYTHONPATH="$ROOT_DIR" "$PYTHON_FOR_COMPILE" -m unittest discover -s tests
 
 step "Linux launcher syntax"
 bash -n scripts/linux/run_desktop_mentor.sh

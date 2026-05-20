@@ -42,6 +42,8 @@ STICKER_ACTION_LABELS = {
     STICKER_ACTION_ERROR: "错误 error",
 }
 MAX_STICKER_FRAMES = 64
+STICKER_ALPHA_THRESHOLD = 8
+STICKER_FRAME_INTERVAL_MS = 120
 STICKER_IMAGE_FILTER = "Images (*.png *.jpg *.jpeg *.webp *.bmp);;All Files (*)"
 STICKER_IMAGE_SUFFIXES = (".png", ".jpg", ".jpeg", ".webp", ".bmp")
 DEFAULT_STICKER_ANIMATION_SPEED = 1.0

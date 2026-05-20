@@ -158,9 +158,9 @@ python3 desktop_mentor.py --load-sticker-dir /path/to/stickers
 - `core/`：qasync 运行时、后台任务执行器和应用编排。
 - `config/`、`state/`：版本化配置迁移、本地会话、记忆和待办状态。
 - `model_client/`：OpenAI-compatible 模型客户端。
-- `tools/`、`security/`：工具计划、执行、权限策略和审计。
-- `pet/`、`cron/`、`platforms/`：桌宠动画、聊天/控制服务、提醒调度和消息平台接口骨架。
-- `ui/`：Qt 界面、Markdown 渲染和主题。
+- `tools/`、`security/`：工具计划、命令解析、自然语言解析、执行、权限策略和审计。
+- `pet/`、`cron/`、`platforms/`：桌宠动画、聊天/控制服务、提醒调度和消息平台接口骨架；`pet/` 保持轻量懒加载，避免纯逻辑导入拉起 Qt 依赖。
+- `ui/`：Qt 界面、桌宠绘制、交互控制、对话窗口、Markdown 渲染和主题。`ui/dialogs.py` 保留为兼容导出入口，具体实现拆到 `chat_dialog.py`、`settings_dialog.py`、`todo_dialog.py` 等模块。
 
 旧的 `conversation_store.py`、`todo_store.py` 和 `control/*` 路径保留为兼容入口，真实实现位于 `state/`、`tools/` 和 `security/`。
 
@@ -238,5 +238,6 @@ DESKTOP_MENTOR_CONFIG=/path/to/config.json ./scripts/linux/run_desktop_mentor.sh
 
 ```bash
 ./scripts/linux/self_test.sh
+PYTHONPATH=. python3 -m unittest discover -s tests
 python3 -m py_compile desktop_mentor.py
 ```

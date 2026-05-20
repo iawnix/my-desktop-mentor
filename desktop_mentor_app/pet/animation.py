@@ -1,8 +1,12 @@
 """Sticker animation domain helpers."""
 from __future__ import annotations
 
-from ..constants import DEFAULT_STICKER_ANIMATION_SPEED, MAX_STICKER_ANIMATION_SPEED, MIN_STICKER_ANIMATION_SPEED
-from ..ui.tokens import STICKER_FRAME_INTERVAL_MS
+from ..constants import (
+    DEFAULT_STICKER_ANIMATION_SPEED,
+    MAX_STICKER_ANIMATION_SPEED,
+    MIN_STICKER_ANIMATION_SPEED,
+    STICKER_FRAME_INTERVAL_MS,
+)
 
 
 def normalized_sticker_speed(value: object) -> float:
