@@ -27,6 +27,7 @@ from PySide6.QtWidgets import (
     QSizePolicy,
     QSizeGrip,
     QSpinBox,
+    QTextBrowser,
     QTextEdit,
     QVBoxLayout,
     QWidget,
@@ -69,7 +70,7 @@ from ..constants import (
 from ..stickers import discover_sticker_sets, normalize_sticker_sets
 from ..todo_store import format_due_time, load_todos_from_items
 from .theme import apply_app_theme
-from .tokens import FULLSCREEN_ALERT_DURATION_MS
+from .tokens import FLUENT_DARK_COLORS, FULLSCREEN_ALERT_DURATION_MS
 
 
 
@@ -78,6 +79,96 @@ def styled_label(text: str, object_name: str, word_wrap: bool = False) -> QLabel
     label.setObjectName(object_name)
     label.setWordWrap(word_wrap)
     return label
+
+
+def markdown_stylesheet() -> str:
+    colors = FLUENT_DARK_COLORS
+    return f"""
+body {{
+  color: {colors["text_primary"]};
+  font-size: 13px;
+  line-height: 1.38;
+  margin: 0;
+}}
+p {{
+  margin: 0 0 8px 0;
+}}
+h1, h2, h3, h4 {{
+  color: {colors["text_primary"]};
+  font-weight: 700;
+  margin: 8px 0 6px 0;
+}}
+ul, ol {{
+  margin: 4px 0 8px 0;
+  padding-left: 20px;
+}}
+li {{
+  margin: 2px 0;
+}}
+blockquote {{
+  color: {colors["text_secondary"]};
+  border-left: 3px solid {colors["accent"]};
+  margin: 6px 0;
+  padding-left: 10px;
+}}
+code {{
+  color: {colors["text_primary"]};
+  background-color: {colors["surface_control"]};
+  font-family: "SFMono-Regular", "SF Mono", Consolas, "Liberation Mono", monospace;
+}}
+pre {{
+  color: {colors["text_primary"]};
+  background-color: {colors["input"]};
+  border: 1px solid {colors["border_control"]};
+  border-radius: 6px;
+  margin: 6px 0 8px 0;
+  padding: 8px;
+}}
+a {{
+  color: {colors["focus"]};
+}}
+table {{
+  border-collapse: collapse;
+  margin: 6px 0 8px 0;
+}}
+th, td {{
+  border: 1px solid {colors["border_control"]};
+  padding: 4px 7px;
+}}
+"""
+
+
+class MarkdownMessageView(QTextBrowser):
+    def __init__(self, markdown: str, parent: QWidget | None = None) -> None:
+        super().__init__(parent)
+        self.setObjectName("chatMarkdownText")
+        self.setReadOnly(True)
+        self.setOpenExternalLinks(True)
+        self.setFrameShape(QFrame.Shape.NoFrame)
+        self.setVerticalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAlwaysOff)
+        self.setHorizontalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAlwaysOff)
+        self.setTextInteractionFlags(
+            Qt.TextInteractionFlag.TextSelectableByMouse
+            | Qt.TextInteractionFlag.LinksAccessibleByMouse
+        )
+        self.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Minimum)
+        self.document().setDocumentMargin(0)
+        self.document().setDefaultStyleSheet(markdown_stylesheet())
+        self.setMarkdown(markdown)
+        self.sync_height_to_document()
+
+    def resizeEvent(self, event) -> None:  # type: ignore[override]
+        super().resizeEvent(event)
+        self.sync_height_to_document()
+
+    def showEvent(self, event) -> None:  # type: ignore[override]
+        super().showEvent(event)
+        self.sync_height_to_document()
+
+    def sync_height_to_document(self) -> None:
+        width = max(1, self.viewport().width())
+        self.document().setTextWidth(width)
+        self.setFixedHeight(max(24, int(self.document().size().height()) + 4))
 
 
 def make_hairline() -> QFrame:
@@ -1126,9 +1217,14 @@ class ChatDialog(QDialog):
         bubble_layout.setContentsMargins(14, 10, 14, 10)
         bubble_layout.setSpacing(0)
 
-        message_label = styled_label(text, "chatText", True)
-        message_label.setTextInteractionFlags(Qt.TextInteractionFlag.TextSelectableByMouse)
-        bubble_layout.addWidget(message_label)
+        if role == "assistant":
+            message_view = MarkdownMessageView(text)
+            bubble_layout.addWidget(message_view)
+        else:
+            message_label = styled_label(text, "chatText", True)
+            message_label.setTextFormat(Qt.TextFormat.PlainText)
+            message_label.setTextInteractionFlags(Qt.TextInteractionFlag.TextSelectableByMouse)
+            bubble_layout.addWidget(message_label)
 
         if role == "user":
             row_layout.addStretch(1)

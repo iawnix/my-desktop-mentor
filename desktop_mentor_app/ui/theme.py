@@ -203,6 +203,14 @@ QLabel#chatText {
     font-size: 13px;
     line-height: 1.35em;
 }
+QTextBrowser#chatMarkdownText {
+    background: transparent;
+    border: 0;
+    color: %(text_primary)s;
+    padding: 0;
+    selection-background-color: %(accent)s;
+    selection-color: %(text_on_accent)s;
+}
 QLabel#chatMeta {
     color: %(text_subtle)s;
     font-size: 11px;

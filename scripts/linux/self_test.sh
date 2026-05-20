@@ -114,7 +114,7 @@ import tempfile
 from pathlib import Path
 
 from PySide6.QtCore import Qt
-from PySide6.QtWidgets import QApplication, QFrame, QMenu, QPushButton, QScrollArea
+from PySide6.QtWidgets import QApplication, QFrame, QMenu, QPushButton, QScrollArea, QTextBrowser
 
 from desktop_mentor_app import config_store
 from desktop_mentor_app.agent_client import agent_system_prompt
@@ -141,6 +141,10 @@ assert all(len(paths) == 16 for paths in default_config.sticker_sets.values()), 
 assert len(default_config.sticker_sets) == 8, default_config.sticker_sets
 chat = ChatDialog()
 context_chat = ChatDialog(context_hint="文件上下文：README.md")
+chat.add_assistant_message("**结论**\n\n- Markdown 列表\n\n```python\nprint('ok')\n```")
+markdown_views = chat.findChildren(QTextBrowser, "chatMarkdownText")
+assert markdown_views, "assistant replies should render through MarkdownMessageView"
+assert "Markdown 列表" in markdown_views[-1].toPlainText(), markdown_views[-1].toPlainText()
 clear_chat_history()
 assert load_chat_history() == []
 managed_session = append_chat_turn("记住我的默认项目是导师桌宠", "已记住")
