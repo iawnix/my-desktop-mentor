@@ -2,12 +2,14 @@
 from __future__ import annotations
 
 import json
+import logging
 import os
 import sys
 from dataclasses import asdict, dataclass, field
 from pathlib import Path
 
 from .assets import DEFAULT_STICKERS_DIR
+from .config.migration import CURRENT_CONFIG_SCHEMA_VERSION, backup_config_before_migration, migrate_config_data
 from .constants import (
     APP_ID,
     CONFIG_POINTER_NAME,
@@ -38,9 +40,12 @@ from .constants import (
 )
 from .stickers import discover_sticker_sets, normalize_sticker_sets
 
+LOGGER = logging.getLogger(__name__)
+
 
 @dataclass
 class AgentConfig:
+    schema_version: int = CURRENT_CONFIG_SCHEMA_VERSION
     api_url: str = ""
     api_key: str = ""
     model: str = DEFAULT_MODEL
@@ -203,13 +208,23 @@ def load_config(path: Path | None = None) -> AgentConfig:
         return new_default_config(target.parent)
     try:
         data = json.loads(target.read_text(encoding="utf-8"))
-    except Exception:
+    except Exception as exc:
+        LOGGER.warning("failed to read config %s; using defaults: %s", target, exc)
         return new_default_config(target.parent)
+    if not isinstance(data, dict):
+        LOGGER.warning("config %s does not contain an object; using defaults", target)
+        return new_default_config(target.parent)
+    backup_config_before_migration(target, data)
+    data = migrate_config_data(data)
 
     config = AgentConfig()
     for key in asdict(config):
         if key in data:
             setattr(config, key, data[key])
+    try:
+        config.schema_version = min(CURRENT_CONFIG_SCHEMA_VERSION, max(1, int(config.schema_version)))
+    except Exception:
+        config.schema_version = CURRENT_CONFIG_SCHEMA_VERSION
     config.model = str(config.model or DEFAULT_MODEL)
     config.image_path = str(config.image_path or "").strip()
     config.icon_path = str(config.icon_path or "").strip()
@@ -267,5 +282,6 @@ def load_config(path: Path | None = None) -> AgentConfig:
 def save_config(config: AgentConfig, path: Path | None = None) -> Path:
     target = path or config_path()
     target.parent.mkdir(parents=True, exist_ok=True)
+    config.schema_version = CURRENT_CONFIG_SCHEMA_VERSION
     target.write_text(json.dumps(asdict(config), ensure_ascii=False, indent=2), encoding="utf-8")
     return target

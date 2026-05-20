@@ -23,7 +23,7 @@ a = Analysis(
         (str(todo_badge), "assets"),
         (str(default_stickers), "assets/stickers"),
     ],
-    hiddenimports=[],
+    hiddenimports=["qasync", "httpx"],
     hookspath=[],
     hooksconfig={},
     runtime_hooks=[],

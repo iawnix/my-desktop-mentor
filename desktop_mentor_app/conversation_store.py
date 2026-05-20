@@ -2,12 +2,15 @@
 from __future__ import annotations
 
 import json
+import logging
 import secrets
 import time
 from dataclasses import dataclass, field
 from pathlib import Path
 
 from .config_store import chat_history_path, config_path, memory_path
+
+LOGGER = logging.getLogger(__name__)
 
 CHAT_HISTORY_DISPLAY_LIMIT = 80
 CHAT_HISTORY_TEXT_LIMIT = 6000
@@ -145,7 +148,8 @@ def read_session_index() -> list[ConversationSession]:
         return []
     try:
         data = json.loads(path.read_text(encoding="utf-8"))
-    except Exception:
+    except Exception as exc:
+        LOGGER.warning("failed to read session index %s: %s", path, exc)
         return []
     raw_sessions = data.get("sessions", data) if isinstance(data, dict) else data
     if not isinstance(raw_sessions, list):
@@ -210,7 +214,8 @@ def read_message_file(path: Path) -> list[ChatHistoryMessage]:
     messages: list[ChatHistoryMessage] = []
     try:
         lines = path.read_text(encoding="utf-8").splitlines()
-    except OSError:
+    except OSError as exc:
+        LOGGER.warning("failed to read message file %s: %s", path, exc)
         return []
     for line in lines:
         if not line.strip():
@@ -429,8 +434,8 @@ def delete_conversation_session(session_id: str) -> ConversationSession:
     sessions = [session for session in read_session_index() if session.session_id != clean_id]
     try:
         session_messages_path(clean_id).unlink()
-    except OSError:
-        pass
+    except OSError as exc:
+        LOGGER.warning("failed to remove conversation file for %s: %s", clean_id, exc)
     write_session_index(sessions)
     if sessions:
         set_active_session(sessions[0].session_id)

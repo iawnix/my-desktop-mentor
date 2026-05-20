@@ -2,10 +2,13 @@
 from __future__ import annotations
 
 import json
+import logging
 from dataclasses import asdict
 from pathlib import Path
 
 from .types import ControlPlan, ControlResult
+
+LOGGER = logging.getLogger(__name__)
 
 
 def audit_log_path() -> Path:
@@ -27,4 +30,4 @@ def append_audit_entry(plan: ControlPlan, result: ControlResult | None = None, e
         with path.open("a", encoding="utf-8") as handle:
             handle.write(json.dumps(payload, ensure_ascii=False) + "\n")
     except Exception:
-        pass
+        LOGGER.exception("failed to append control audit entry")

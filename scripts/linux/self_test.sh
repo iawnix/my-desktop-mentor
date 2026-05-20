@@ -53,6 +53,33 @@ step "Python syntax"
 "$PYTHON_FOR_COMPILE" -m py_compile \
   desktop_mentor.py \
   desktop_mentor_app/constants.py \
+  desktop_mentor_app/logging_config.py \
+  desktop_mentor_app/config/__init__.py \
+  desktop_mentor_app/config/migration.py \
+  desktop_mentor_app/core/__init__.py \
+  desktop_mentor_app/core/runtime.py \
+  desktop_mentor_app/core/task_runner.py \
+  desktop_mentor_app/model_client/__init__.py \
+  desktop_mentor_app/model_client/base.py \
+  desktop_mentor_app/model_client/openai_compatible.py \
+  desktop_mentor_app/state/__init__.py \
+  desktop_mentor_app/state/conversations.py \
+  desktop_mentor_app/state/memory.py \
+  desktop_mentor_app/state/todos.py \
+  desktop_mentor_app/security/__init__.py \
+  desktop_mentor_app/security/audit.py \
+  desktop_mentor_app/security/policy.py \
+  desktop_mentor_app/tools/__init__.py \
+  desktop_mentor_app/tools/base.py \
+  desktop_mentor_app/tools/executor.py \
+  desktop_mentor_app/tools/registry.py \
+  desktop_mentor_app/cron/__init__.py \
+  desktop_mentor_app/cron/scheduler.py \
+  desktop_mentor_app/platforms/__init__.py \
+  desktop_mentor_app/platforms/base.py \
+  desktop_mentor_app/platforms/whatsapp.py \
+  desktop_mentor_app/pet/__init__.py \
+  desktop_mentor_app/pet/animation.py \
   desktop_mentor_app/config_store.py \
   desktop_mentor_app/input_method.py \
   desktop_mentor_app/control/__init__.py \
@@ -99,6 +126,8 @@ import os
 
 data = json.loads(os.environ["SELF_TEST_OUTPUT"])
 assert data["quit_on_last_window_closed"] is False
+assert data["config_schema_version"] == 2
+assert data["app_log_path"].endswith("/logs/app.log")
 PY
 
 step "Qt dialog smoke"
@@ -106,6 +135,7 @@ QT_QPA_PLATFORM=offscreen \
 DESKTOP_MENTOR_CONFIG_DIR="${DESKTOP_MENTOR_CONFIG_DIR:-/tmp/my-desktop-mentor-self-test}" \
 "$PYTHON_FOR_QT" - <<'PY'
 import time
+import asyncio
 import builtins
 import os
 import shutil
@@ -119,7 +149,7 @@ from PySide6.QtGui import QKeyEvent, QTextCursor
 from PySide6.QtWidgets import QApplication, QFrame, QMenu, QPushButton, QScrollArea, QWidget
 
 from desktop_mentor_app import config_store
-from desktop_mentor_app.agent_client import agent_system_prompt, compact_text, limit_formatted_text
+from desktop_mentor_app.agent_client import agent_system_prompt, call_agent_async, compact_text, limit_formatted_text
 from desktop_mentor_app.assets import DEFAULT_IMAGE, DEFAULT_STICKERS_DIR, ROOT
 from desktop_mentor_app.config_store import AgentConfig, new_default_config
 from desktop_mentor_app.control import PermissionLevel, build_control_plan, build_control_plan_from_agent_reply, execute_control_plan
@@ -133,11 +163,16 @@ from desktop_mentor_app.todo_store import load_todos, save_todos
 from desktop_mentor_app.ui.dialogs import ChatDialog, SettingsDialog, TodoDialog, prepare_modern_menu
 from desktop_mentor_app.ui.markdown_rendering import normalize_model_markdown, render_markdown_fragment
 from desktop_mentor_app.ui.pet_widget import DesktopMentorPet
+from desktop_mentor_app.config.migration import CURRENT_CONFIG_SCHEMA_VERSION
+from desktop_mentor_app.cron.scheduler import reschedule_due_items
+from desktop_mentor_app.pet.animation import sticker_frame_interval_seconds
+from desktop_mentor_app.platforms.whatsapp import WhatsAppPlatform
 
 app = QApplication([])
 configure_linux_input_method_environment()
 settings = SettingsDialog(AgentConfig())
 default_config = new_default_config()
+assert default_config.schema_version == CURRENT_CONFIG_SCHEMA_VERSION
 assert default_config.sticker_animation_speed == DEFAULT_STICKER_ANIMATION_SPEED, default_config.sticker_animation_speed
 assert settings.sticker_animation_speed_spin.value() == DEFAULT_STICKER_ANIMATION_SPEED, settings.sticker_animation_speed_spin.value()
 assert all(len(paths) == 16 for paths in default_config.sticker_sets.values()), default_config.sticker_sets
@@ -173,6 +208,7 @@ assert "codehilite" in fallback_html, fallback_html
 assert "```" not in fallback_html, fallback_html
 assert compact_text("a\nb", 10) == "a b"
 assert limit_formatted_text("a\nb", 10) == "a\nb"
+assert "目标" in asyncio.run(call_agent_async(AgentConfig(), "科研目标"))
 submitted = []
 chat.text_edit.submitted.connect(lambda: submitted.append(True))
 chat.text_edit.setPlainText("send me")
@@ -206,6 +242,7 @@ assert pet.reload_sticker_sets() == []
 assert abs(pet.sticker_frame_interval_seconds() - 0.12) < 0.001, pet.sticker_frame_interval_seconds()
 pet.config.sticker_animation_speed = 2.0
 assert abs(pet.sticker_frame_interval_seconds() - 0.06) < 0.001, pet.sticker_frame_interval_seconds()
+assert abs(sticker_frame_interval_seconds(2.0) - 0.06) < 0.001
 pet.config.sticker_animation_speed = DEFAULT_STICKER_ANIMATION_SPEED
 bundled_source = pet.current_sticker_source_rect()
 bundled_visual = pet.current_sticker_visual_rect()
@@ -373,6 +410,18 @@ assert "README.md" in drop_context
 assert "skipped sensitive filename" in drop_context
 assert "skipped generated/cache folder" in drop_context
 assert DROP_CONTEXT_PROMPT_HEADER in drop_prompt
+due_items, remaining_items = reschedule_due_items(
+    [{"id": "due", "text": "due", "due_ts": int(time.time()) - 1}],
+    now_ts=int(time.time()),
+    repeat_seconds=10,
+)
+assert len(due_items) == 1 and len(remaining_items) == 1
+try:
+    asyncio.run(WhatsAppPlatform().send_message("unused", "hello"))
+except NotImplementedError:
+    pass
+else:
+    raise AssertionError("WhatsAppPlatform should be a placeholder")
 
 saved_env = {key: os.environ.get(key) for key in ("DESKTOP_MENTOR_CONFIG_DIR", "DESKTOP_MENTOR_CONFIG", "XDG_CONFIG_HOME")}
 with tempfile.TemporaryDirectory() as tmp:
@@ -394,7 +443,10 @@ with tempfile.TemporaryDirectory() as tmp:
     custom_prompt_path = Path(tmp) / "custom-prompt" / "config.json"
     custom_prompt_path.parent.mkdir(parents=True)
     custom_prompt_path.write_text('{"system_prompt": ' + __import__("json").dumps(custom_prompt, ensure_ascii=False) + "}", encoding="utf-8")
-    assert config_store.load_config(custom_prompt_path).system_prompt == custom_prompt
+    loaded_custom_prompt = config_store.load_config(custom_prompt_path)
+    assert loaded_custom_prompt.system_prompt == custom_prompt
+    assert loaded_custom_prompt.schema_version == CURRENT_CONFIG_SCHEMA_VERSION
+    assert (custom_prompt_path.parent / "config.v1.bak.json").exists()
     custom_messages = {
         "click_message": "抓紧, 谢谢!",
         "idle_message": "课题如何了? 抓紧谢谢!",
@@ -407,6 +459,7 @@ with tempfile.TemporaryDirectory() as tmp:
     custom_messages_path.parent.mkdir(parents=True)
     custom_messages_path.write_text(__import__("json").dumps(custom_messages, ensure_ascii=False), encoding="utf-8")
     loaded_messages = config_store.load_config(custom_messages_path)
+    assert loaded_messages.schema_version == CURRENT_CONFIG_SCHEMA_VERSION
     assert loaded_messages.click_message == custom_messages["click_message"]
     assert loaded_messages.idle_message == custom_messages["idle_message"]
     assert loaded_messages.drop_message == custom_messages["drop_message"]

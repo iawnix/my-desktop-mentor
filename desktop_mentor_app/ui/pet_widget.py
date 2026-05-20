@@ -2,8 +2,8 @@
 from __future__ import annotations
 
 import json
+import logging
 import math
-import threading
 import time
 from pathlib import Path
 
@@ -11,11 +11,14 @@ from PySide6.QtCore import QObject, QPoint, QPointF, QRect, QRectF, QTimer, Qt, 
 from PySide6.QtGui import QAction, QColor, QContextMenuEvent, QFont, QGuiApplication, QIcon, QImage, QMouseEvent, QPainter, QPainterPath, QPen, QPixmap, QFontMetrics
 from PySide6.QtWidgets import QApplication, QDialog, QMenu, QWidget
 
-from ..agent_client import append_memory_turn, call_agent, compact_text
+from ..agent_client import call_agent_async, compact_text
 from ..assets import DEFAULT_IMAGE, convert_image_to_ico, ensure_default_icon, icon_cache_path_for_image
 from ..config_store import config_path, load_config, save_config, save_config_directory
-from ..control import ControlPlan, build_control_plan, build_control_plan_from_agent_reply, execute_control_plan
-from ..conversation_store import (
+from ..control import ControlPlan
+from ..core.task_runner import AsyncTaskRunner
+from ..cron.scheduler import reschedule_due_items
+from ..pet.animation import normalized_sticker_speed, sticker_frame_interval_seconds
+from ..state.conversations import (
     append_chat_turn,
     build_conversation_memory_context,
     clear_chat_history,
@@ -26,24 +29,22 @@ from ..conversation_store import (
     load_chat_history,
     set_active_session,
 )
+from ..state.memory import append_memory_turn
 from ..constants import (
     DEFAULT_CLICK_MESSAGE,
     DEFAULT_DROP_MESSAGE,
     DEFAULT_IDLE_MESSAGE,
     DEFAULT_IDLE_SECONDS,
     DEFAULT_MESSAGE_SECONDS,
-    DEFAULT_STICKER_ANIMATION_SPEED,
     MAX_PET_SIZE,
     DEFAULT_TODO_REPEAT_SECONDS,
     IDLE_CHECK_INTERVAL_MS,
     IDLE_MODE_FULLSCREEN,
     MAX_MESSAGE_SECONDS,
-    MAX_STICKER_ANIMATION_SPEED,
     MAX_TODO_REPEAT_SECONDS,
     MIN_IDLE_SECONDS,
     MIN_MESSAGE_SECONDS,
     MIN_PET_SIZE,
-    MIN_STICKER_ANIMATION_SPEED,
     MIN_TODO_REPEAT_SECONDS,
     STICKER_ACTION_ALERT,
     STICKER_ACTION_DRAG,
@@ -80,7 +81,6 @@ from .tokens import (
     FULLSCREEN_ALERT_DURATION_MS,
     MAX_BUBBLE_TEXT_CHARS,
     STICKER_ALPHA_THRESHOLD,
-    STICKER_FRAME_INTERVAL_MS,
     TODO_BUBBLE_GAP,
     TODO_BUBBLE_MAX_HEIGHT,
     TODO_BUBBLE_MAX_VISIBLE,
@@ -95,8 +95,12 @@ from .tokens import (
 from ..drop_context import collect_drop_context, compose_prompt_with_drop_context
 from ..idle_detector import idle_detection_diagnostics, system_idle_seconds
 from ..stickers import normalize_sticker_sets
-from ..todo_store import due_todos, future_todos, load_todos, remove_todos_by_ids, rescheduled_todo, save_todos
+from ..state.todos import due_todos, load_todos, remove_todos_by_ids, save_todos
+from ..tools.executor import execute_control_plan_async
+from ..tools.registry import build_control_plan, build_control_plan_from_agent_reply
 from .dialogs import ChatDialog, FullScreenIdleAlert, SettingsDialog, TextViewDialog, TodoDialog, prepare_modern_menu
+
+LOGGER = logging.getLogger(__name__)
 
 
 class AgentSignals(QObject):
@@ -247,6 +251,9 @@ class DesktopMentorPet(QWidget):
         self.agent_signals.reply_ready.connect(self.show_agent_reply)
         self.agent_signals.error_ready.connect(self.show_agent_error)
         self.agent_signals.control_plan_ready.connect(self.show_agent_control_request)
+        self.task_runner = AsyncTaskRunner(self)
+        self.task_runner.task_error.connect(lambda text: self.agent_signals.error_ready.emit(text, ""))
+        self.destroyed.connect(lambda _obj=None: self.task_runner.shutdown())
 
         self.pulse_timer = QTimer(self)
         self.pulse_timer.setInterval(16)
@@ -419,14 +426,10 @@ class DesktopMentorPet(QWidget):
             self.pulse_timer.start()
 
     def sticker_animation_speed(self) -> float:
-        try:
-            speed = float(self.config.sticker_animation_speed)
-        except Exception:
-            speed = DEFAULT_STICKER_ANIMATION_SPEED
-        return max(MIN_STICKER_ANIMATION_SPEED, min(MAX_STICKER_ANIMATION_SPEED, speed))
+        return normalized_sticker_speed(self.config.sticker_animation_speed)
 
     def sticker_frame_interval_seconds(self) -> float:
-        return (STICKER_FRAME_INTERVAL_MS / 1000) / self.sticker_animation_speed()
+        return sticker_frame_interval_seconds(self.config.sticker_animation_speed)
 
     def play_action(self, action: str, *, duration: float = 0.0, loop: bool = True, restart: bool = True) -> None:
         if action not in STICKER_ACTIONS:
@@ -1354,12 +1357,9 @@ class DesktopMentorPet(QWidget):
         if not due:
             return
         repeat_seconds = self.todo_repeat_seconds()
-        next_due_ts = now_ts + repeat_seconds
-        remaining = future_todos(todos, now_ts)
+        due, remaining = reschedule_due_items(todos, now_ts=now_ts, repeat_seconds=repeat_seconds)
         for todo in due:
             self.add_todo_bubble(todo)
-            remaining = remove_todos_by_ids(remaining, [str(todo["id"])])
-            remaining.append(rescheduled_todo(todo, next_due_ts))
         save_todos(remaining)
         if self.fullscreen_alert is not None:
             self.fullscreen_alert.close()
@@ -1486,26 +1486,26 @@ class DesktopMentorPet(QWidget):
         prompt = compose_prompt_with_drop_context(user_prompt, drop_context)
         self.show_bubble("导师处理中。", duration=min(1.8, self.message_duration()), action=None)
         self.play_action(STICKER_ACTION_THINKING, loop=True)
-        thread = threading.Thread(
-            target=self.fetch_agent_reply,
-            args=(prompt, user_prompt, active_session.session_id, use_conversation_context),
-            daemon=True,
+        self.task_runner.run_async(
+            lambda: self.fetch_agent_reply(prompt, user_prompt, active_session.session_id, use_conversation_context),
+            on_error=lambda exc, session_id=active_session.session_id: self.agent_signals.error_ready.emit(
+                f"Agent 出错：{type(exc).__name__}: {exc}",
+                session_id,
+            ),
         )
-        thread.start()
 
     def handle_control_plan(self, plan: ControlPlan, user_prompt: str, session_id: str) -> None:
         if plan.is_blocked:
             if self.chat_dialog is not None:
                 self.chat_dialog.set_waiting(True)
-            self.fetch_control_reply(plan, user_prompt, session_id)
+            self.queue_control_reply(plan, user_prompt, session_id)
             return
         if plan.requires_confirmation:
             self.request_control_authorization(plan, user_prompt, session_id)
             return
         self.show_bubble("执行本地只读操作。", duration=min(1.8, self.message_duration()), action=STICKER_ACTION_THINKING)
         self.play_action(STICKER_ACTION_THINKING, loop=True)
-        thread = threading.Thread(target=self.fetch_control_reply, args=(plan, user_prompt, session_id), daemon=True)
-        thread.start()
+        self.queue_control_reply(plan, user_prompt, session_id)
 
     def request_control_authorization(self, plan: ControlPlan, user_prompt: str, session_id: str) -> None:
         """Queue any user-approval control plan behind the same chat authorization card."""
@@ -1541,12 +1541,7 @@ class DesktopMentorPet(QWidget):
             self.chat_dialog.set_waiting(True)
         self.show_bubble("正在执行电脑操作。", duration=min(1.8, self.message_duration()), action=STICKER_ACTION_THINKING)
         self.play_action(STICKER_ACTION_THINKING, loop=True)
-        thread = threading.Thread(
-            target=self.fetch_control_reply,
-            args=(plan, f"执行确认：{plan.title}", session_id),
-            daemon=True,
-        )
-        thread.start()
+        self.queue_control_reply(plan, f"执行确认：{plan.title}", session_id)
 
     def cancel_control_plan(self, plan_id: str) -> None:
         pending = self.pending_control_plans.pop(plan_id, None)
@@ -1560,11 +1555,21 @@ class DesktopMentorPet(QWidget):
             pass
         self.agent_signals.reply_ready.emit(reply, session_id)
 
-    def fetch_control_reply(self, plan: ControlPlan, memory_prompt: str, session_id: str) -> None:
+    def queue_control_reply(self, plan: ControlPlan, memory_prompt: str, session_id: str) -> None:
+        self.task_runner.run_async(
+            lambda: self.fetch_control_reply(plan, memory_prompt, session_id),
+            on_error=lambda exc, target=session_id: self.agent_signals.error_ready.emit(
+                f"电脑操作出错：{type(exc).__name__}: {exc}",
+                target,
+            ),
+        )
+
+    async def fetch_control_reply(self, plan: ControlPlan, memory_prompt: str, session_id: str) -> None:
         try:
-            result = execute_control_plan(plan)
+            result = await execute_control_plan_async(plan)
             reply = result.display_text()
         except Exception as exc:
+            LOGGER.exception("control execution failed")
             reply = f"电脑操作出错：{type(exc).__name__}: {exc}"
             try:
                 append_chat_turn(memory_prompt, reply, session_id)
@@ -1595,12 +1600,13 @@ class DesktopMentorPet(QWidget):
         )
         self.show_bubble("导师正在看文件。", duration=min(1.8, self.message_duration()), action=None)
         self.play_action(STICKER_ACTION_THINKING, loop=True)
-        thread = threading.Thread(
-            target=self.fetch_agent_reply,
-            args=(prompt, "只问文件", active_session.session_id, bool(self.config.memory_enabled)),
-            daemon=True,
+        self.task_runner.run_async(
+            lambda: self.fetch_agent_reply(prompt, "只问文件", active_session.session_id, bool(self.config.memory_enabled)),
+            on_error=lambda exc, session_id=active_session.session_id: self.agent_signals.error_ready.emit(
+                f"Agent 出错：{type(exc).__name__}: {exc}",
+                session_id,
+            ),
         )
-        thread.start()
 
     def open_drop_summary(self) -> None:
         self.mark_interaction()
@@ -1641,7 +1647,7 @@ class DesktopMentorPet(QWidget):
         y = min(max(candidates[0].y(), area.top() + margin), area.bottom() - size.height() - margin)
         dialog.move(x, y)
 
-    def fetch_agent_reply(
+    async def fetch_agent_reply(
         self,
         prompt: str,
         memory_prompt: str | None = None,
@@ -1658,12 +1664,13 @@ class DesktopMentorPet(QWidget):
             if memory_context:
                 agent_prompt = f"{memory_context}\n\n当前输入:\n{prompt}"
         try:
-            reply = call_agent(
+            reply = await call_agent_async(
                 self.config,
                 agent_prompt,
                 include_legacy_memory=bool(use_conversation_context and self.config.memory_enabled),
             )
         except Exception as exc:
+            LOGGER.exception("agent reply failed")
             reply = f"Agent 出错：{type(exc).__name__}: {exc}"
             try:
                 append_chat_turn(memory_prompt or prompt, reply, session.session_id)

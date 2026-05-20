@@ -2,11 +2,14 @@
 from __future__ import annotations
 
 import json
+import logging
 import time
 from collections.abc import Iterable
 from pathlib import Path
 
 from .config_store import todos_path
+
+LOGGER = logging.getLogger(__name__)
 
 
 def load_todos(path: Path | None = None) -> list[dict[str, object]]:
@@ -15,7 +18,8 @@ def load_todos(path: Path | None = None) -> list[dict[str, object]]:
         return []
     try:
         raw_items = json.loads(target.read_text(encoding="utf-8"))
-    except Exception:
+    except Exception as exc:
+        LOGGER.warning("failed to read todos %s: %s", target, exc)
         return []
     if not isinstance(raw_items, list):
         return []

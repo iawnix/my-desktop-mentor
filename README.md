@@ -151,6 +151,23 @@ python3 desktop_mentor.py --load-sticker-dir /path/to/stickers
 
 关闭 `使用当前会话上下文` 后，本次输入会进入新的独立会话；旧会话仍保留在本地历史中。
 
+## 架构
+
+当前代码按 V2 分层组织：
+
+- `core/`：qasync 运行时、后台任务执行器和应用编排。
+- `config/`、`state/`：版本化配置迁移、本地会话、记忆和待办状态。
+- `model_client/`：OpenAI-compatible 模型客户端。
+- `tools/`、`security/`：工具计划、执行、权限策略和审计。
+- `pet/`、`cron/`、`platforms/`：桌宠动画、提醒调度和消息平台接口骨架。
+- `ui/`：Qt 界面、Markdown 渲染和主题。
+
+运行时日志写入配置目录下的：
+
+```text
+logs/app.log
+```
+
 ## 电脑控制
 
 常用命令：
@@ -205,6 +222,9 @@ CONTROL_REQUEST: 读取 D:\DATA\Desktop\Nature_manuscript.txt
 - `memory.jsonl`
 - `todos.json`
 - `control/audit.jsonl`
+- `logs/app.log`
+
+旧版 `config.json` 首次加载时会自动迁移到 `schema_version: 2`，并在同目录生成一次 `config.v1.bak.json` 备份。
 
 覆盖配置路径：
 

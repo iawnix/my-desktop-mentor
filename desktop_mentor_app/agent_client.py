@@ -1,7 +1,9 @@
 """OpenAI-compatible agent client and local fallback."""
 from __future__ import annotations
 
+import asyncio
 import json
+import logging
 import time
 import urllib.error
 import urllib.request
@@ -14,6 +16,9 @@ from .constants import (
     MAX_AGENT_REPLY_CHARS,
     MAX_AGENT_REPLY_TOKENS,
 )
+from .model_client.openai_compatible import OpenAICompatibleModelClient
+
+LOGGER = logging.getLogger(__name__)
 
 CONTROL_AWARENESS_PROMPT = """运行边界：
 - 这个桌宠内置受控电脑操作层，可读取文件、列目录、搜索文本，并在写入/打开/运行前弹出确认卡。
@@ -110,27 +115,55 @@ def agent_system_prompt(config: AgentConfig) -> str:
     return f"{base_prompt}\n\n{CONTROL_AWARENESS_PROMPT}"
 
 
+def build_agent_messages(
+    config: AgentConfig,
+    user_text: str,
+    *,
+    include_legacy_memory: bool | None = None,
+) -> list[dict[str, str]]:
+    messages = [
+        {"role": "system", "content": agent_system_prompt(config)},
+    ]
+    should_include_legacy_memory = config.memory_enabled if include_legacy_memory is None else include_legacy_memory
+    if should_include_legacy_memory:
+        messages.extend(load_memory_messages(config.memory_turns))
+    messages.append({"role": "user", "content": user_text})
+    return messages
+
+
+async def call_agent_async(config: AgentConfig, user_text: str, *, include_legacy_memory: bool | None = None) -> str:
+    url = normalize_chat_url(config.api_url)
+    if not url:
+        return local_agent_reply(user_text)
+    client = OpenAICompatibleModelClient()
+    try:
+        response = await client.complete(
+            url=url,
+            api_key=config.api_key,
+            model=config.model or DEFAULT_MODEL,
+            messages=build_agent_messages(config, user_text, include_legacy_memory=include_legacy_memory),
+            max_tokens=MAX_AGENT_REPLY_TOKENS,
+            temperature=0.8,
+        )
+    except Exception as exc:
+        LOGGER.warning("agent request failed: %s", exc)
+        return f"接口没接上。我先给本地建议：把目标、材料和卡点列出来。{type(exc).__name__}"
+    return limit_formatted_text(str(response.content or local_agent_reply(user_text)), MAX_AGENT_REPLY_CHARS)
+
+
 def call_agent(config: AgentConfig, user_text: str, *, include_legacy_memory: bool | None = None) -> str:
     url = normalize_chat_url(config.api_url)
     if not url:
         return local_agent_reply(user_text)
-
-    payload = {
-        "model": config.model or DEFAULT_MODEL,
-        "messages": [
-            {"role": "system", "content": agent_system_prompt(config)},
-        ],
-        "temperature": 0.8,
-        "max_tokens": MAX_AGENT_REPLY_TOKENS,
-    }
-    should_include_legacy_memory = config.memory_enabled if include_legacy_memory is None else include_legacy_memory
-    if should_include_legacy_memory:
-        payload["messages"].extend(load_memory_messages(config.memory_turns))
-    payload["messages"].append({"role": "user", "content": user_text})
     headers = {"Content-Type": "application/json"}
     if config.api_key.strip():
         headers["Authorization"] = f"Bearer {config.api_key.strip()}"
-
+    payload = {
+        "model": config.model or DEFAULT_MODEL,
+        "messages": build_agent_messages(config, user_text, include_legacy_memory=include_legacy_memory),
+        "temperature": 0.8,
+        "max_tokens": MAX_AGENT_REPLY_TOKENS,
+    }
     request = urllib.request.Request(
         url,
         data=json.dumps(payload, ensure_ascii=False).encode("utf-8"),
@@ -141,6 +174,7 @@ def call_agent(config: AgentConfig, user_text: str, *, include_legacy_memory: bo
         with urllib.request.urlopen(request, timeout=20) as response:  # noqa: S310 - user-configured endpoint
             data = json.loads(response.read().decode("utf-8"))
     except (urllib.error.URLError, TimeoutError, json.JSONDecodeError, OSError) as exc:
+        LOGGER.warning("agent request failed: %s", exc)
         return f"接口没接上。我先给本地建议：把目标、材料和卡点列出来。{type(exc).__name__}"
 
     try:

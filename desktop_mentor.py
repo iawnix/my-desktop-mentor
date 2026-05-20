@@ -18,14 +18,15 @@ from desktop_mentor_app.input_method import (
 
 configure_linux_input_method_environment()
 
-from PySide6.QtCore import QTimer
 from PySide6.QtWidgets import QApplication
 
 from desktop_mentor_app.assets import DEFAULT_IMAGE, convert_image_to_ico, ensure_default_icon
 from desktop_mentor_app.config_store import chat_history_path, load_config, memory_path, save_config, todos_path
 from desktop_mentor_app.control.audit_log import audit_log_path
+from desktop_mentor_app.core.runtime import run_qt_app
 from desktop_mentor_app.constants import APP_NAME, DEFAULT_CLICK_MESSAGE, DEFAULT_PET_SIZE
 from desktop_mentor_app.idle_detector import idle_detection_diagnostics
+from desktop_mentor_app.logging_config import app_log_path, configure_logging
 from desktop_mentor_app.stickers import discover_sticker_sets, sticker_frame_counts
 from desktop_mentor_app.ui.theme import apply_app_theme
 from desktop_mentor_app.ui.pet_widget import DesktopMentorPet
@@ -124,6 +125,7 @@ def main(argv: list[str]) -> int:
     configure_linux_input_method_environment()
     prefer_movable_linux_platform()
     configure_qt_input_method_runtime()
+    configure_logging(debug=os.environ.get("DESKTOP_MENTOR_DEBUG", "").lower() in {"1", "true", "yes", "on"})
     if args.diagnose:
         print(
             json.dumps(
@@ -168,16 +170,15 @@ def main(argv: list[str]) -> int:
             "icon_error": pet.icon_error,
             "window_size": [pet.width(), pet.height()],
             "config_path": str(pet.config_path),
+            "config_schema_version": pet.config.schema_version,
+            "app_log_path": str(app_log_path(pet.config_path)),
             "quit_on_last_window_closed": app.quitOnLastWindowClosed(),
             "idle_detection": idle_detection_diagnostics(),
         }
         print(json.dumps(result, ensure_ascii=False))
         return 0
 
-    pet.show()
-    if args.quit_after > 0:
-        QTimer.singleShot(int(args.quit_after * 1000), app.quit)
-    return int(app.exec())
+    return run_qt_app(app, lambda: pet, quit_after=args.quit_after)
 
 
 if __name__ == "__main__":
