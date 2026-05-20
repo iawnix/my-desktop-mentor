@@ -13,7 +13,7 @@ from ..config_store import chat_history_path, config_path, memory_path
 LOGGER = logging.getLogger(__name__)
 
 CHAT_HISTORY_DISPLAY_LIMIT = 80
-CHAT_HISTORY_TEXT_LIMIT = 6000
+CHAT_HISTORY_TEXT_LIMIT = 20000
 CONVERSATION_MAX_MESSAGES = 800
 SESSION_TITLE_LIMIT = 34
 SESSION_SUMMARY_LIMIT = 260

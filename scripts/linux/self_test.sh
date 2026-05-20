@@ -240,6 +240,15 @@ chat.text_edit.setPlainText("send me")
 chat.text_edit.keyPressEvent(QKeyEvent(QEvent.Type.KeyPress, Qt.Key.Key_Return, Qt.KeyboardModifier.NoModifier))
 assert submitted, "Enter should submit chat input"
 chat.set_waiting(False)
+assert chat.cancel_button.isHidden()
+cancelled_requests = []
+chat.request_cancelled.connect(lambda session_id: cancelled_requests.append(session_id))
+chat.set_waiting(True)
+assert not chat.cancel_button.isHidden()
+assert not chat.send_button.isEnabled()
+chat.cancel_current_request()
+assert cancelled_requests == [chat.active_session_id], cancelled_requests
+assert not chat.waiting_for_reply
 chat.text_edit.setPlainText("line 1")
 cursor = chat.text_edit.textCursor()
 cursor.movePosition(QTextCursor.MoveOperation.End)
@@ -344,6 +353,8 @@ chat.submit_message()
 assert submissions == [("新的问题", False, "", False)], submissions
 assert chat.waiting_for_reply
 chat.add_assistant_message("新的回答")
+chat.add_assistant_message("长回复\n" + ("detail " * 320))
+assert any(button.text() == "完整回复" for button in chat.findChildren(QPushButton)), "long replies should expose a detail button"
 chat.set_waiting(False)
 assert not chat.waiting_for_reply
 pet.open_chat()

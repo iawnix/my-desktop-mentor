@@ -45,10 +45,13 @@ class AsyncTaskRunner(QObject):
         *,
         on_success: Callable[[T], None] | None = None,
         on_error: Callable[[Exception], None] | None = None,
-    ) -> None:
+    ) -> asyncio.Task[None] | None:
         async def _wrapped() -> None:
             try:
                 result = await coro_factory()
+            except asyncio.CancelledError:
+                LOGGER.debug("background task cancelled")
+                return
             except Exception as exc:
                 LOGGER.exception("background task failed")
                 if on_error is not None:
@@ -63,5 +66,5 @@ class AsyncTaskRunner(QObject):
             loop = asyncio.get_running_loop()
         except RuntimeError:
             threading.Thread(target=lambda: asyncio.run(_wrapped()), daemon=True).start()
-            return
-        loop.create_task(_wrapped())
+            return None
+        return loop.create_task(_wrapped())

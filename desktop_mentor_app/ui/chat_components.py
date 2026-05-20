@@ -5,15 +5,18 @@ import os
 
 from PySide6.QtCore import QTimer, Qt, QUrl, Signal
 from PySide6.QtGui import QColor, QKeyEvent
-from PySide6.QtWidgets import QFrame, QHBoxLayout, QSizePolicy, QTextBrowser, QTextEdit, QVBoxLayout, QWidget
+from PySide6.QtWidgets import QFrame, QHBoxLayout, QPushButton, QSizePolicy, QTextBrowser, QTextEdit, QVBoxLayout, QWidget
 
 try:
     from PySide6.QtWebEngineWidgets import QWebEngineView
 except Exception:
     QWebEngineView = None  # type: ignore[assignment]
 
-from .dialog_chrome import styled_label
+from .dialog_chrome import mark_button, styled_label
 from .markdown_rendering import markdown_css, render_markdown_document, render_markdown_fragment
+from .text_view_dialog import TextViewDialog
+
+FULL_REPLY_THRESHOLD = 1600
 
 
 def webengine_markdown_enabled() -> bool:
@@ -121,6 +124,7 @@ class ChatMessageCard(QFrame):
     def __init__(self, role: str, text: str, parent: QWidget | None = None) -> None:
         super().__init__(parent)
         self.role = "assistant" if role == "assistant" else "user"
+        self.full_text = str(text or "")
         self.setObjectName("chatMessageCardAssistant" if self.role == "assistant" else "chatMessageCardUser")
         self.setMaximumWidth(880 if self.role == "assistant" else 700)
         self.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Maximum)
@@ -137,9 +141,26 @@ class ChatMessageCard(QFrame):
         layout.addLayout(header)
 
         if self.role == "assistant":
-            layout.addWidget(create_markdown_message_view(text), 1)
+            layout.addWidget(create_markdown_message_view(self.full_text), 1)
+            if self.has_full_reply_detail():
+                detail_button = QPushButton("完整回复")
+                mark_button(detail_button, "quietButton")
+                detail_button.setToolTip("在独立窗口中查看完整回复。")
+                detail_button.clicked.connect(self.open_full_reply)
+                footer = QHBoxLayout()
+                footer.setContentsMargins(0, 0, 0, 0)
+                footer.addStretch(1)
+                footer.addWidget(detail_button)
+                layout.addLayout(footer)
         else:
             message_label = styled_label(text, "chatText", True)
             message_label.setTextFormat(Qt.TextFormat.PlainText)
             message_label.setTextInteractionFlags(Qt.TextInteractionFlag.TextSelectableByMouse)
             layout.addWidget(message_label)
+
+    def has_full_reply_detail(self) -> bool:
+        return len(self.full_text) >= FULL_REPLY_THRESHOLD or self.full_text.count("\n") >= 18
+
+    def open_full_reply(self) -> None:
+        dialog = TextViewDialog("完整回复", self.full_text, self.window())
+        dialog.exec()

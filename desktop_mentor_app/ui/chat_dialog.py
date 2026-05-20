@@ -39,6 +39,7 @@ from .dialog_chrome import (
 
 class ChatDialog(QDialog):
     message_submitted = Signal(str, bool, str, bool)
+    request_cancelled = Signal(str)
     control_plan_approved = Signal(str)
     control_plan_cancelled = Signal(str)
     session_selected = Signal(str)
@@ -119,6 +120,11 @@ class ChatDialog(QDialog):
         mark_button(send_button, "primaryButton")
         send_button.clicked.connect(self.submit_message)
         self.send_button = send_button
+        self.cancel_button = QPushButton("取消")
+        mark_button(self.cancel_button, "secondaryButton")
+        self.cancel_button.setToolTip("取消当前请求。")
+        self.cancel_button.clicked.connect(self.cancel_current_request)
+        self.cancel_button.hide()
 
         self.session_toggle_button = QPushButton("会话")
         mark_button(self.session_toggle_button, "railToggleButton")
@@ -245,6 +251,7 @@ class ChatDialog(QDialog):
         composer_buttons.setSpacing(8)
         composer_buttons.addWidget(self.conversation_context_check)
         composer_buttons.addStretch(1)
+        composer_buttons.addWidget(self.cancel_button)
         composer_buttons.addWidget(send_button)
         composer_layout.addLayout(composer_buttons)
         conversation.addWidget(composer, 0)
@@ -578,6 +585,8 @@ class ChatDialog(QDialog):
         self.waiting_for_reply = waiting
         self.send_button.setEnabled(not waiting)
         self.send_button.setText("思考中" if waiting else "发送")
+        self.cancel_button.setVisible(waiting)
+        self.cancel_button.setEnabled(waiting)
 
     def submit_message(self) -> None:
         if self.waiting_for_reply:
@@ -593,6 +602,12 @@ class ChatDialog(QDialog):
             self.active_session_id,
             self.use_conversation_context(),
         )
+
+    def cancel_current_request(self) -> None:
+        if not self.waiting_for_reply:
+            return
+        self.set_waiting(False)
+        self.request_cancelled.emit(self.active_session_id)
 
     def request_clear_history(self) -> None:
         self.history_clear_requested.emit(self.active_session_id)

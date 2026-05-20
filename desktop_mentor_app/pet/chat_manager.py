@@ -117,6 +117,11 @@ class PetConversationService:
         self._append_chat_turn(f"取消电脑操作：{plan.title}", reply, session_id)
         return reply
 
+    def record_agent_request_cancelled(self, user_prompt: str, session_id: str) -> str:
+        reply = "已取消本次请求。"
+        self._append_chat_turn(user_prompt, reply, session_id)
+        return reply
+
     def _agent_prompt(
         self,
         config: AgentConfig,

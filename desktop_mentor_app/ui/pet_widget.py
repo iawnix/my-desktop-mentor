@@ -8,8 +8,8 @@ import time
 from pathlib import Path
 
 from PySide6.QtCore import QObject, QPoint, QPointF, QRect, QRectF, QTimer, Qt, QEvent, Signal
-from PySide6.QtGui import QContextMenuEvent, QFont, QFontMetrics, QGuiApplication, QIcon, QMouseEvent, QPixmap
-from PySide6.QtWidgets import QDialog, QWidget
+from PySide6.QtGui import QAction, QContextMenuEvent, QFont, QFontMetrics, QGuiApplication, QIcon, QMouseEvent, QPixmap
+from PySide6.QtWidgets import QApplication, QDialog, QMenu, QSystemTrayIcon, QWidget
 
 from ..agent_client import compact_text
 from ..assets import DEFAULT_IMAGE, convert_image_to_ico, ensure_default_icon, icon_cache_path_for_image
@@ -21,6 +21,7 @@ from ..pet.sticker_manager import StickerAnimationManager
 from ..pet.todo_manager import PetTodoService
 from ..state.conversations import ensure_active_session, get_session
 from ..constants import (
+    APP_NAME,
     DEFAULT_CLICK_MESSAGE,
     DEFAULT_IDLE_MESSAGE,
     DEFAULT_IDLE_SECONDS,
@@ -65,7 +66,7 @@ from .tokens import (
 )
 from ..idle_detector import idle_detection_diagnostics, system_idle_seconds
 from ..stickers import normalize_sticker_sets
-from .dialogs import ChatDialog, FullScreenIdleAlert, TextViewDialog
+from .dialogs import ChatDialog, FullScreenIdleAlert, TextViewDialog, prepare_modern_menu
 from .pet_dialog_coordinator import PetDialogCoordinator
 from .pet_interaction_controller import PetInteractionController
 from .pet_painter import PetPainter
@@ -110,6 +111,8 @@ class DesktopMentorPet(QWidget):
         self.sticker_animation = StickerAnimationManager(self.pixmap)
         self.fullscreen_alert: FullScreenIdleAlert | None = None
         self.chat_dialog: ChatDialog | None = None
+        self.tray_icon: QSystemTrayIcon | None = None
+        self.tray_menu: QMenu | None = None
         self.icon_error = self.refresh_window_icon()
 
         self.dragging = False
@@ -178,6 +181,7 @@ class DesktopMentorPet(QWidget):
         self.setMouseTracking(True)
         self.resize(*self.window_dimensions())
         self.move_to_lower_right()
+        self.setup_tray_icon()
 
     def effective_image_path(self, fallback: Path = DEFAULT_IMAGE) -> Path:
         raw_path = str(self.config.image_path or "").strip()
@@ -263,18 +267,78 @@ class DesktopMentorPet(QWidget):
                     force=False,
                 )
                 self.config.icon_path = str(icon_path)
-                self.setWindowIcon(QIcon(str(icon_path)))
+                icon = QIcon(str(icon_path))
+                self.setWindowIcon(icon)
+                self.update_tray_icon(icon)
                 return ""
 
             raw_icon = str(self.config.icon_path or "").strip()
             if raw_icon and Path(raw_icon).expanduser().exists():
-                self.setWindowIcon(QIcon(str(Path(raw_icon).expanduser())))
+                icon = QIcon(str(Path(raw_icon).expanduser()))
+                self.setWindowIcon(icon)
+                self.update_tray_icon(icon)
                 return ""
             self.config.icon_path = ""
             return ""
         except Exception as exc:
             self.config.icon_path = ""
             return f"{type(exc).__name__}: {exc}"
+
+    def update_tray_icon(self, icon: QIcon | None = None) -> None:
+        if self.tray_icon is None:
+            return
+        self.tray_icon.setIcon(icon or self.windowIcon())
+
+    def setup_tray_icon(self) -> None:
+        if self.tray_icon is not None or not QSystemTrayIcon.isSystemTrayAvailable():
+            return
+        self.tray_icon = QSystemTrayIcon(self.windowIcon(), self)
+        self.tray_icon.setToolTip(APP_NAME)
+        self.tray_menu = self.build_tray_menu()
+        self.tray_icon.setContextMenu(self.tray_menu)
+        self.tray_icon.activated.connect(self.handle_tray_activation)
+        self.tray_icon.show()
+
+    def build_tray_menu(self) -> QMenu:
+        menu = prepare_modern_menu(QMenu(self))
+        show_action = QAction("显示桌宠", self)
+        hide_action = QAction("隐藏桌宠", self)
+        chat_action = QAction("对话", self)
+        todo_action = QAction("待办", self)
+        settings_action = QAction("设置", self)
+        reset_action = QAction("回到右下角", self)
+        quit_action = QAction("退出", self)
+        show_action.triggered.connect(self.restore_from_tray)
+        hide_action.triggered.connect(self.hide)
+        chat_action.triggered.connect(self.open_chat)
+        todo_action.triggered.connect(self.open_todos)
+        settings_action.triggered.connect(self.open_settings)
+        reset_action.triggered.connect(self.move_to_lower_right)
+        quit_action.triggered.connect(QApplication.quit)
+        menu.addAction(show_action)
+        menu.addAction(hide_action)
+        menu.addSeparator()
+        menu.addAction(chat_action)
+        menu.addAction(todo_action)
+        menu.addAction(settings_action)
+        menu.addSeparator()
+        menu.addAction(reset_action)
+        menu.addAction(quit_action)
+        return menu
+
+    def restore_from_tray(self) -> None:
+        self.show()
+        self.keep_window_visible()
+        self.raise_()
+        self.activateWindow()
+
+    def handle_tray_activation(self, reason: QSystemTrayIcon.ActivationReason) -> None:
+        if reason in {
+            QSystemTrayIcon.ActivationReason.Trigger,
+            QSystemTrayIcon.ActivationReason.DoubleClick,
+            QSystemTrayIcon.ActivationReason.MiddleClick,
+        }:
+            self.restore_from_tray()
 
     def window_dimensions(self) -> tuple[int, int]:
         rail_width = self.action_rail_width()

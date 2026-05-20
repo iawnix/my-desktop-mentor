@@ -1,6 +1,7 @@
 """Dialog and chat/control coordination for the desktop pet widget."""
 from __future__ import annotations
 
+import asyncio
 import time
 from pathlib import Path
 from typing import Any
@@ -38,6 +39,8 @@ from .todo_dialog import TodoDialog
 class PetDialogCoordinator:
     def __init__(self, pet: Any) -> None:
         self.pet = pet
+        self.active_agent_tasks: dict[str, asyncio.Task[None]] = {}
+        self.active_agent_prompts: dict[str, str] = {}
 
     def open_settings(self) -> None:
         pet = self.pet
@@ -127,6 +130,7 @@ class PetDialogCoordinator:
             use_conversation_context=bool(pet.config.memory_enabled),
         )
         dialog.message_submitted.connect(self.handle_chat_message)
+        dialog.request_cancelled.connect(self.cancel_agent_request)
         dialog.control_plan_approved.connect(self.approve_control_plan)
         dialog.control_plan_cancelled.connect(self.cancel_control_plan)
         dialog.session_selected.connect(self.load_chat_session_in_dialog)
@@ -223,13 +227,57 @@ class PetDialogCoordinator:
         prompt = compose_prompt_with_drop_context(user_prompt, drop_context)
         pet.show_bubble("导师处理中。", duration=min(1.8, pet.message_duration()), action=None)
         pet.play_action(STICKER_ACTION_THINKING, loop=True)
-        pet.task_runner.run_async(
-            lambda: pet.fetch_agent_reply(prompt, user_prompt, active_session.session_id, use_conversation_context),
-            on_error=lambda exc, target=active_session.session_id: pet.agent_signals.error_ready.emit(
-                f"Agent 出错：{type(exc).__name__}: {exc}",
-                target,
-            ),
+        self.queue_agent_reply(prompt, user_prompt, active_session.session_id, use_conversation_context)
+
+    def queue_agent_reply(
+        self,
+        prompt: str,
+        memory_prompt: str,
+        session_id: str,
+        use_conversation_context: bool,
+    ) -> None:
+        pet = self.pet
+        previous_task = self.active_agent_tasks.pop(session_id, None)
+        if previous_task is not None and not previous_task.done():
+            previous_task.cancel()
+        self.active_agent_prompts[session_id] = memory_prompt
+        task = pet.task_runner.run_async(
+            lambda: pet.fetch_agent_reply(prompt, memory_prompt, session_id, use_conversation_context),
+            on_error=lambda exc, target=session_id: self.handle_agent_task_error(target, exc),
         )
+        if task is None:
+            return
+        self.active_agent_tasks[session_id] = task
+        task.add_done_callback(lambda done_task, target=session_id: self.clear_agent_request(target, done_task))
+
+    def clear_agent_request(self, session_id: str, task: asyncio.Task[None]) -> None:
+        if self.active_agent_tasks.get(session_id) is task:
+            self.active_agent_tasks.pop(session_id, None)
+            self.active_agent_prompts.pop(session_id, None)
+
+    def handle_agent_task_error(self, session_id: str, exc: Exception) -> None:
+        self.active_agent_tasks.pop(session_id, None)
+        self.active_agent_prompts.pop(session_id, None)
+        self.pet.agent_signals.error_ready.emit(f"Agent 出错：{type(exc).__name__}: {exc}", session_id)
+
+    def cancel_agent_request(self, session_id: str) -> None:
+        pet = self.pet
+        target_session_id = session_id or (pet.chat_dialog.active_session_id if pet.chat_dialog is not None else "")
+        if not target_session_id:
+            return
+        task = self.active_agent_tasks.pop(target_session_id, None)
+        user_prompt = self.active_agent_prompts.pop(target_session_id, "")
+        if task is not None and not task.done():
+            task.cancel()
+        if user_prompt:
+            reply = pet.chat_service.record_agent_request_cancelled(user_prompt, target_session_id)
+        else:
+            reply = "已取消本次请求。"
+        if pet.chat_dialog is not None and pet.chat_dialog.active_session_id == target_session_id:
+            pet.chat_dialog.add_assistant_message(reply)
+            pet.chat_dialog.set_waiting(False)
+            self.refresh_chat_dialog_sessions()
+        pet.show_bubble(reply, duration=pet.message_duration(), action=STICKER_ACTION_TAP)
 
     def handle_control_plan(self, plan: ControlPlan, user_prompt: str, session_id: str) -> None:
         pet = self.pet
@@ -325,13 +373,7 @@ class PetDialogCoordinator:
         )
         pet.show_bubble("导师正在看文件。", duration=min(1.8, pet.message_duration()), action=None)
         pet.play_action(STICKER_ACTION_THINKING, loop=True)
-        pet.task_runner.run_async(
-            lambda: pet.fetch_agent_reply(prompt, "只问文件", active_session.session_id, bool(pet.config.memory_enabled)),
-            on_error=lambda exc, target=active_session.session_id: pet.agent_signals.error_ready.emit(
-                f"Agent 出错：{type(exc).__name__}: {exc}",
-                target,
-            ),
-        )
+        self.queue_agent_reply(prompt, "只问文件", active_session.session_id, bool(pet.config.memory_enabled))
 
     def open_drop_summary(self) -> None:
         pet = self.pet
