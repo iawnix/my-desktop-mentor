@@ -3,7 +3,6 @@ from __future__ import annotations
 
 from pathlib import Path
 
-from ..control.types import ControlPlan, PermissionLevel
 from ..security.policy import can_read_path, can_write_path
 from .path_parser import (
     WRITABLE_TEXT_SUFFIXES,
@@ -13,6 +12,7 @@ from .path_parser import (
     extract_write_content,
 )
 from .plan_helpers import blocked_plan, new_plan_id
+from .types import ControlPlan, PermissionLevel
 
 
 def build_natural_language_read_plan(text: str, workspace: Path) -> ControlPlan | None:

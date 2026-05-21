@@ -7,8 +7,8 @@ import logging
 import time
 import urllib.error
 import urllib.request
+from typing import TYPE_CHECKING
 
-from .config_store import AgentConfig, memory_path
 from .constants import (
     DEFAULT_IDLE_MESSAGE,
     DEFAULT_MODEL,
@@ -16,7 +16,11 @@ from .constants import (
     MAX_AGENT_REPLY_CHARS,
     MAX_AGENT_REPLY_TOKENS,
 )
+from .model_client.base import ModelClient
 from .model_client.openai_compatible import OpenAICompatibleModelClient
+
+if TYPE_CHECKING:
+    from .config_store import AgentConfig
 
 LOGGER = logging.getLogger(__name__)
 
@@ -77,6 +81,8 @@ def local_agent_reply(user_text: str, *, idle: bool = False) -> str:
 
 
 def load_memory_messages(limit_turns: int) -> list[dict[str, str]]:
+    from .config_store import memory_path
+
     path = memory_path()
     if not path.exists():
         return []
@@ -96,6 +102,8 @@ def load_memory_messages(limit_turns: int) -> list[dict[str, str]]:
 
 
 def append_memory_turn(user_text: str, assistant_text: str) -> None:
+    from .config_store import memory_path
+
     path = memory_path()
     path.parent.mkdir(parents=True, exist_ok=True)
     timestamp = int(time.time())
@@ -131,13 +139,19 @@ def build_agent_messages(
     return messages
 
 
-async def call_agent_async(config: AgentConfig, user_text: str, *, include_legacy_memory: bool | None = None) -> str:
+async def call_agent_async(
+    config: AgentConfig,
+    user_text: str,
+    *,
+    include_legacy_memory: bool | None = None,
+    client: ModelClient | None = None,
+) -> str:
     url = normalize_chat_url(config.api_url)
     if not url:
         return local_agent_reply(user_text)
-    client = OpenAICompatibleModelClient()
+    model_client = client or OpenAICompatibleModelClient()
     try:
-        response = await client.complete(
+        response = await model_client.complete(
             url=url,
             api_key=config.api_key,
             model=config.model or DEFAULT_MODEL,

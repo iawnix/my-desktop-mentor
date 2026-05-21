@@ -3,7 +3,7 @@ from __future__ import annotations
 
 import secrets
 
-from ..control.types import ControlPlan, PermissionLevel
+from .types import ControlPlan, PermissionLevel
 
 
 def new_plan_id() -> str:

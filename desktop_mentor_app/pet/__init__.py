@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 __all__ = [
+    "IdleManager",
     "PetConversationService",
     "PetTodoService",
     "StickerAnimationManager",
@@ -14,6 +15,10 @@ def __getattr__(name: str):
         from .animation import sticker_frame_interval_seconds
 
         return sticker_frame_interval_seconds
+    if name == "IdleManager":
+        from .idle_manager import IdleManager
+
+        return IdleManager
     if name == "PetConversationService":
         from .chat_manager import PetConversationService
 

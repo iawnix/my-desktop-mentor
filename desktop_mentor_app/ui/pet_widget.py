@@ -14,12 +14,13 @@ from PySide6.QtWidgets import QApplication, QDialog, QMenu, QSystemTrayIcon, QWi
 from ..agent_client import compact_text
 from ..assets import DEFAULT_IMAGE, convert_image_to_ico, ensure_default_icon, icon_cache_path_for_image
 from ..config_store import config_path, load_config
-from ..control import ControlPlan
 from ..core.task_runner import AsyncTaskRunner
 from ..pet.chat_manager import PetConversationService
+from ..pet.idle_manager import IdleManager
 from ..pet.sticker_manager import StickerAnimationManager
 from ..pet.todo_manager import PetTodoService
 from ..state.conversations import ensure_active_session, get_session
+from ..tools.types import ControlPlan
 from ..constants import (
     APP_NAME,
     DEFAULT_CLICK_MESSAGE,
@@ -64,7 +65,6 @@ from .tokens import (
     TODO_BUBBLE_TOP,
     WINDOW_PAD,
 )
-from ..idle_detector import idle_detection_diagnostics, system_idle_seconds
 from ..stickers import normalize_sticker_sets
 from .dialogs import ChatDialog, FullScreenIdleAlert, TextViewDialog, prepare_modern_menu
 from .pet_dialog_coordinator import PetDialogCoordinator
@@ -82,7 +82,17 @@ class AgentSignals(QObject):
 
 
 class DesktopMentorPet(QWidget):
-    def __init__(self, image_path: Path, message: str, size: int) -> None:
+    def __init__(
+        self,
+        image_path: Path,
+        message: str,
+        size: int,
+        *,
+        idle_manager: IdleManager | None = None,
+        task_runner: AsyncTaskRunner | None = None,
+        chat_service: PetConversationService | None = None,
+        todo_service: PetTodoService | None = None,
+    ) -> None:
         super().__init__(
             None,
             Qt.WindowType.FramelessWindowHint
@@ -138,16 +148,15 @@ class DesktopMentorPet(QWidget):
         self.last_context_menu_closed_at = 0.0
         self.pulse_until = 0.0
         self.message_until = 0.0
-        self.last_interaction = time.monotonic()
-        self.idle_suppressed_until = 0.0
+        self.idle_manager = idle_manager or IdleManager()
         self.hovering = False
         self.agent_signals = AgentSignals()
         self.agent_signals.reply_ready.connect(self.show_agent_reply)
         self.agent_signals.error_ready.connect(self.show_agent_error)
         self.agent_signals.control_plan_ready.connect(self.show_agent_control_request)
-        self.task_runner = AsyncTaskRunner(self)
-        self.chat_service = PetConversationService()
-        self.todo_service = PetTodoService()
+        self.task_runner = task_runner or AsyncTaskRunner(self)
+        self.chat_service = chat_service or PetConversationService()
+        self.todo_service = todo_service or PetTodoService()
         self.dialog_coordinator = PetDialogCoordinator(self)
         self.interaction_controller = PetInteractionController(self)
         self.pet_painter = PetPainter(self)
@@ -421,19 +430,17 @@ class DesktopMentorPet(QWidget):
         self.dialog_coordinator.show_agent_control_request(plan, assistant_text, source_text, session_id)
 
     def mark_interaction(self) -> None:
-        self.last_interaction = time.monotonic()
+        self.idle_manager.mark_interaction()
 
     def check_idle(self) -> None:
-        if time.monotonic() < self.idle_suppressed_until:
+        if self.idle_manager.is_suppressed():
             return
         if self.todo_bubbles:
             return
         if self.todo_service.has_due_items():
             return
         idle_seconds = max(MIN_IDLE_SECONDS, int(self.config.idle_seconds or DEFAULT_IDLE_SECONDS))
-        idle_for = system_idle_seconds()
-        if idle_for is None:
-            idle_for = time.monotonic() - self.last_interaction
+        idle_for = self.idle_manager.idle_seconds()
         if idle_for < idle_seconds:
             return
         self.show_idle_reminder()
@@ -447,7 +454,7 @@ class DesktopMentorPet(QWidget):
 
     def open_idle_diagnostics(self) -> None:
         self.mark_interaction()
-        report = idle_detection_diagnostics()
+        report = self.idle_manager.diagnostics()
         text = json.dumps(report, ensure_ascii=False, indent=2)
         dialog = TextViewDialog("Idle 检测诊断", text)
         self.position_dialog_near_pet(dialog)
@@ -709,7 +716,7 @@ class DesktopMentorPet(QWidget):
         self.todo_service.acknowledge(todo_id)
         self.todo_bubbles = [bubble for bubble in self.todo_bubbles if str(bubble["todo_id"]) != todo_id]
         self.recalculate_todo_stack_layout()
-        self.idle_suppressed_until = time.monotonic() + 6.0
+        self.idle_manager.suppress_for(6.0)
         self.update()
 
     def sync_todo_bubbles_with_store(self) -> None:
@@ -810,7 +817,7 @@ class DesktopMentorPet(QWidget):
             self.add_todo_bubble(todo)
         if self.fullscreen_alert is not None:
             self.fullscreen_alert.close()
-        self.idle_suppressed_until = time.monotonic() + max(8.0, self.message_duration() + 3.0)
+        self.idle_manager.suppress_for(max(8.0, self.message_duration() + 3.0))
 
     def drop_context_hint(self) -> str:
         return self.dialog_coordinator.drop_context_hint()

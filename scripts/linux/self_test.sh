@@ -62,6 +62,11 @@ step "Python syntax"
   desktop_mentor_app/model_client/__init__.py \
   desktop_mentor_app/model_client/base.py \
   desktop_mentor_app/model_client/openai_compatible.py \
+  desktop_mentor_app/platforms/__init__.py \
+  desktop_mentor_app/platforms/base.py \
+  desktop_mentor_app/platforms/display.py \
+  desktop_mentor_app/platforms/registry.py \
+  desktop_mentor_app/platforms/whatsapp.py \
   desktop_mentor_app/state/__init__.py \
   desktop_mentor_app/state/conversations.py \
   desktop_mentor_app/state/memory.py \
@@ -77,14 +82,13 @@ step "Python syntax"
   desktop_mentor_app/tools/path_parser.py \
   desktop_mentor_app/tools/plan_helpers.py \
   desktop_mentor_app/tools/registry.py \
+  desktop_mentor_app/tools/types.py \
   desktop_mentor_app/cron/__init__.py \
   desktop_mentor_app/cron/scheduler.py \
-  desktop_mentor_app/platforms/__init__.py \
-  desktop_mentor_app/platforms/base.py \
-  desktop_mentor_app/platforms/whatsapp.py \
   desktop_mentor_app/pet/__init__.py \
   desktop_mentor_app/pet/animation.py \
   desktop_mentor_app/pet/chat_manager.py \
+  desktop_mentor_app/pet/idle_manager.py \
   desktop_mentor_app/pet/sticker_manager.py \
   desktop_mentor_app/pet/todo_manager.py \
   desktop_mentor_app/config_store.py \
@@ -441,7 +445,7 @@ assert not todos.due_edit.calendarPopup()
 pet.acknowledge_todo_reminder("self-test")
 assert load_todos() == []
 assert pet.todo_bubbles == []
-assert pet.idle_suppressed_until > time.monotonic()
+assert pet.idle_manager.suppressed_until > time.monotonic()
 assert "README.md" in drop_context
 assert "skipped sensitive filename" in drop_context
 assert "skipped generated/cache folder" in drop_context

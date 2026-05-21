@@ -5,10 +5,14 @@ import unittest
 from pathlib import Path
 
 from desktop_mentor_app.control import PermissionLevel
+from desktop_mentor_app.tools.types import PermissionLevel as ToolPermissionLevel
 from desktop_mentor_app.tools.registry import build_control_plan, build_control_plan_from_agent_reply
 
 
 class ControlPlanningTests(unittest.TestCase):
+    def test_control_compatibility_exports_tool_types(self) -> None:
+        self.assertIs(PermissionLevel, ToolPermissionLevel)
+
     def test_write_command_builds_confirmation_plan(self) -> None:
         with tempfile.TemporaryDirectory() as tmpdir:
             plan = build_control_plan("/write note.txt :: hello", tmpdir)

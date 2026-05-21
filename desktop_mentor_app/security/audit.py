@@ -6,7 +6,7 @@ import logging
 from dataclasses import asdict
 from pathlib import Path
 
-from ..control.types import ControlPlan, ControlResult
+from ..tools.types import ControlPlan, ControlResult
 
 LOGGER = logging.getLogger(__name__)
 

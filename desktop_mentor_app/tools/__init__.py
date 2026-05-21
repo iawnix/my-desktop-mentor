@@ -1,12 +1,28 @@
 """Tool registry and execution facade."""
 from __future__ import annotations
 
-from .executor import execute_control_plan, execute_control_plan_async
-from .registry import build_control_plan, build_control_plan_from_agent_reply
-
 __all__ = [
+    "ControlPlan",
+    "ControlResult",
+    "PermissionLevel",
     "build_control_plan",
     "build_control_plan_from_agent_reply",
     "execute_control_plan",
     "execute_control_plan_async",
 ]
+
+
+def __getattr__(name: str):
+    if name in {"ControlPlan", "ControlResult", "PermissionLevel"}:
+        from . import types
+
+        return getattr(types, name)
+    if name in {"build_control_plan", "build_control_plan_from_agent_reply"}:
+        from . import registry
+
+        return getattr(registry, name)
+    if name in {"execute_control_plan", "execute_control_plan_async"}:
+        from . import executor
+
+        return getattr(executor, name)
+    raise AttributeError(name)

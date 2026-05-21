@@ -6,7 +6,7 @@ from dataclasses import dataclass
 
 from ..agent_client import call_agent_async
 from ..config_store import AgentConfig
-from ..control import ControlPlan
+from ..model_client.base import ModelClient
 from ..state.conversations import (
     append_chat_turn,
     build_conversation_memory_context,
@@ -18,6 +18,7 @@ from ..state.conversations import (
 from ..state.memory import append_memory_turn
 from ..tools.executor import execute_control_plan_async
 from ..tools.registry import build_control_plan_from_agent_reply
+from ..tools.types import ControlPlan
 
 LOGGER = logging.getLogger(__name__)
 
@@ -39,6 +40,9 @@ class ControlExecutionReply:
 
 
 class PetConversationService:
+    def __init__(self, model_client: ModelClient | None = None) -> None:
+        self._model_client = model_client
+
     def session_for_context_policy(
         self,
         user_prompt: str,
@@ -67,6 +71,7 @@ class PetConversationService:
                 config,
                 agent_prompt,
                 include_legacy_memory=bool(use_conversation_context and config.memory_enabled),
+                client=self._model_client,
             )
         except Exception as exc:
             LOGGER.exception("agent reply failed")

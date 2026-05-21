@@ -13,9 +13,9 @@ import sys
 import webbrowser
 from pathlib import Path
 
-from ..control.types import ControlPlan, ControlResult, PermissionLevel
 from ..security.audit import append_audit_entry
 from ..security.policy import SKIP_DIR_NAMES, control_workspace, is_sensitive_path, resolve_user_path
+from .types import ControlPlan, ControlResult
 
 MAX_TEXT_BYTES = 32_000
 MAX_OUTPUT_CHARS = 12_000

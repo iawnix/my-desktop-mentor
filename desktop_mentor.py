@@ -5,7 +5,6 @@ from __future__ import annotations
 import argparse
 import json
 import os
-import subprocess
 import sys
 from pathlib import Path
 
@@ -13,7 +12,6 @@ from desktop_mentor_app.input_method import (
     configure_linux_input_method_environment,
     configure_qt_input_method_runtime,
     input_method_diagnostics,
-    preferred_x11_display,
 )
 
 configure_linux_input_method_environment()
@@ -25,8 +23,9 @@ from desktop_mentor_app.config_store import chat_history_path, load_config, memo
 from desktop_mentor_app.security.audit import audit_log_path
 from desktop_mentor_app.core.runtime import run_qt_app
 from desktop_mentor_app.constants import APP_NAME, DEFAULT_CLICK_MESSAGE, DEFAULT_PET_SIZE
-from desktop_mentor_app.idle_detector import idle_detection_diagnostics
 from desktop_mentor_app.logging_config import app_log_path, configure_logging
+from desktop_mentor_app.pet.idle_manager import IdleManager
+from desktop_mentor_app.platforms.display import prefer_movable_linux_platform
 from desktop_mentor_app.stickers import discover_sticker_sets, sticker_frame_counts
 from desktop_mentor_app.ui.theme import apply_app_theme
 from desktop_mentor_app.ui.pet_widget import DesktopMentorPet
@@ -45,51 +44,6 @@ def parse_args(argv: list[str]) -> argparse.Namespace:
     parser.add_argument("--force-icon", action="store_true", help="regenerate ICO even when the target is newer")
     parser.add_argument("--load-sticker-dir", type=Path, help="load action sticker frames from a directory with idle/tap/drag/... subfolders")
     return parser.parse_args(argv)
-
-def prefer_movable_linux_platform() -> None:
-    if not sys.platform.startswith("linux"):
-        return
-    if os.environ.get("DESKTOP_MENTOR_ALLOW_WAYLAND", "0") == "1":
-        return
-    if os.environ.get("QT_QPA_PLATFORM", "").lower() != "wayland":
-        return
-
-    if not os.environ.get("XAUTHORITY"):
-        runtime_dir = Path(os.environ.get("XDG_RUNTIME_DIR", "/run/user/1000"))
-        for auth_file in runtime_dir.glob(".mutter-Xwaylandauth.*"):
-            if auth_file.is_file():
-                os.environ["XAUTHORITY"] = str(auth_file)
-                break
-
-    display = preferred_x11_display()
-    if not os.environ.get("DISPLAY") and display:
-        os.environ["DISPLAY"] = display
-    if (
-        os.environ.get("DISPLAY") or Path("/tmp/.X11-unix/X0").exists() or Path("/tmp/.X11-unix/X1").exists()
-    ) and qt_platform_can_start("xcb"):
-        os.environ["QT_QPA_PLATFORM"] = "xcb"
-
-
-def qt_platform_can_start(platform: str) -> bool:
-    env = os.environ.copy()
-    env["QT_QPA_PLATFORM"] = platform
-    try:
-        result = subprocess.run(
-            [
-                sys.executable,
-                "-c",
-                "from PySide6.QtWidgets import QApplication; app = QApplication([]); app.quit()",
-            ],
-            env=env,
-            stdout=subprocess.DEVNULL,
-            stderr=subprocess.DEVNULL,
-            timeout=3,
-            check=False,
-        )
-    except Exception:
-        return False
-    return result.returncode == 0
-
 
 def main(argv: list[str]) -> int:
     args = parse_args(argv)
@@ -131,7 +85,7 @@ def main(argv: list[str]) -> int:
             json.dumps(
                 {
                     "input_method": input_method_diagnostics(),
-                    "idle_detection": idle_detection_diagnostics(),
+                    "idle_detection": IdleManager().diagnostics(),
                 },
                 ensure_ascii=False,
             ),
@@ -173,7 +127,7 @@ def main(argv: list[str]) -> int:
             "config_schema_version": pet.config.schema_version,
             "app_log_path": str(app_log_path(pet.config_path)),
             "quit_on_last_window_closed": app.quitOnLastWindowClosed(),
-            "idle_detection": idle_detection_diagnostics(),
+            "idle_detection": pet.idle_manager.diagnostics(),
         }
         print(json.dumps(result, ensure_ascii=False))
         return 0

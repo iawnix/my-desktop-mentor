@@ -17,7 +17,6 @@ from ..constants import (
     STICKER_ACTION_TAP,
     STICKER_ACTION_THINKING,
 )
-from ..control import ControlPlan
 from ..drop_context import compose_prompt_with_drop_context
 from ..state.conversations import (
     clear_chat_history,
@@ -30,6 +29,7 @@ from ..state.conversations import (
 )
 from ..state.todos import load_todos, save_todos
 from ..tools.registry import build_control_plan
+from ..tools.types import ControlPlan
 from .chat_dialog import ChatDialog
 from .settings_dialog import SettingsDialog
 from .text_view_dialog import TextViewDialog

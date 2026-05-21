@@ -5,7 +5,7 @@ import os
 import tempfile
 from pathlib import Path
 
-from ..control.types import PermissionLevel
+from ..tools.types import PermissionLevel
 
 SENSITIVE_NAME_PARTS = (
     ".env",

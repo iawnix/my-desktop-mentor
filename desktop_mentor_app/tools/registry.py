@@ -4,12 +4,12 @@ from __future__ import annotations
 import re
 from dataclasses import replace
 
-from ..control.types import ControlPlan, PermissionLevel
 from ..security.policy import can_read_path, can_run_command, can_write_path, control_workspace, resolve_user_path
 from .command_parser import CONTROL_COMMANDS, HELP_TEXT, parse_inline_body, parse_run_args, split_command
 from .natural_language import build_natural_language_plan
 from .path_parser import desktop_path
 from .plan_helpers import blocked_plan, new_plan_id
+from .types import ControlPlan, PermissionLevel
 
 CONTROL_REQUEST_RE = re.compile(
     r"^\s*(?:CONTROL_REQUEST|COMPUTER_CONTROL|Computer control|电脑控制请求|电脑控制|工具请求)\s*[:：]\s*(.+?)\s*$",

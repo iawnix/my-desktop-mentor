@@ -3,7 +3,7 @@ from __future__ import annotations
 
 from dataclasses import dataclass, field
 
-from ..control.types import PermissionLevel
+from .types import PermissionLevel
 
 
 @dataclass(frozen=True)
