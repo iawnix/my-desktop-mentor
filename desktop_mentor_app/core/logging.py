@@ -5,7 +5,7 @@ import logging
 from logging.handlers import RotatingFileHandler
 from pathlib import Path
 
-from ..constants import APP_ID
+from ..constants.app import APP_ID
 
 LOG_FORMAT = "%(asctime)s %(levelname)s [%(name)s] %(message)s"
 

@@ -4,8 +4,8 @@ import unittest
 from types import SimpleNamespace
 
 from desktop_mentor_app.model_client.agent import call_agent, call_agent_async, normalize_chat_url
-from desktop_mentor_app.constants import DEFAULT_MODEL, DEFAULT_PERSONALITY_PROMPT
 from desktop_mentor_app.model_client.base import ModelResponse
+from desktop_mentor_app.constants.model import DEFAULT_MODEL, DEFAULT_PERSONALITY_PROMPT
 
 
 def agent_config(**overrides: object) -> SimpleNamespace:

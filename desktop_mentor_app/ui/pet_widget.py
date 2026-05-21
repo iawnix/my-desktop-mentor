@@ -21,24 +21,26 @@ from ..pet.sticker_manager import StickerAnimationManager
 from ..pet.todo_manager import PetTodoService
 from ..state.conversations import ensure_active_session, get_session
 from ..tools.types import ControlPlan
-from ..constants import (
+from ..constants.pet import (
     DEFAULT_CLICK_MESSAGE,
     DEFAULT_IDLE_MESSAGE,
     DEFAULT_IDLE_SECONDS,
     DEFAULT_MESSAGE_SECONDS,
-    MAX_PET_SIZE,
     IDLE_CHECK_INTERVAL_MS,
     IDLE_MODE_FULLSCREEN,
     MAX_MESSAGE_SECONDS,
+    MAX_PET_SIZE,
     MIN_IDLE_SECONDS,
     MIN_MESSAGE_SECONDS,
     MIN_PET_SIZE,
+)
+from ..constants.stickers import (
     STICKER_ACTION_ALERT,
     STICKER_ACTION_ERROR,
     STICKER_ACTION_SPEAKING,
     STICKER_ACTION_TAP,
-    TODO_CHECK_INTERVAL_MS,
 )
+from ..constants.todos import TODO_CHECK_INTERVAL_MS
 from .tokens import (
     BUBBLE_BODY_MAX_HEIGHT,
     BUBBLE_BODY_MIN_HEIGHT,

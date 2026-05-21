@@ -9,12 +9,8 @@ from PySide6.QtCore import QEvent, QPoint, QPointF, QRectF, Qt
 from PySide6.QtGui import QAction, QContextMenuEvent, QGuiApplication, QMouseEvent
 from PySide6.QtWidgets import QApplication, QMenu
 
-from ..constants import (
-    DEFAULT_CLICK_MESSAGE,
-    DEFAULT_DROP_MESSAGE,
-    STICKER_ACTION_DRAG,
-    STICKER_ACTION_DROP_FILE,
-)
+from ..constants.pet import DEFAULT_CLICK_MESSAGE, DEFAULT_DROP_MESSAGE
+from ..constants.stickers import STICKER_ACTION_DRAG, STICKER_ACTION_DROP_FILE
 from ..tools.drop_context import collect_drop_context
 from .dialog_chrome import prepare_modern_menu
 from .pointer_events import as_context_menu_pos, as_global_pos, as_local_pos

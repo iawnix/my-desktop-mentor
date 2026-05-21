@@ -11,12 +11,8 @@ from PySide6.QtGui import QGuiApplication
 from PySide6.QtWidgets import QDialog
 
 from ..config.store import save_config, save_config_directory
-from ..constants import (
-    IDLE_MODE_FULLSCREEN,
-    STICKER_ACTION_ERROR,
-    STICKER_ACTION_TAP,
-    STICKER_ACTION_THINKING,
-)
+from ..constants.pet import IDLE_MODE_FULLSCREEN
+from ..constants.stickers import STICKER_ACTION_ERROR, STICKER_ACTION_TAP, STICKER_ACTION_THINKING
 from ..tools.drop_context import compose_prompt_with_drop_context
 from ..state.conversations import (
     clear_chat_history,

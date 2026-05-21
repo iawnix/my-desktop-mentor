@@ -7,7 +7,7 @@ from PySide6.QtCore import QObject
 from PySide6.QtGui import QAction, QIcon
 from PySide6.QtWidgets import QApplication, QMenu, QSystemTrayIcon, QWidget
 
-from ..constants import APP_NAME
+from ..constants.app import APP_NAME
 from .dialog_chrome import prepare_modern_menu
 
 

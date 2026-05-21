@@ -1,0 +1,7 @@
+"""Todo reminder defaults."""
+from __future__ import annotations
+
+TODO_CHECK_INTERVAL_MS = 1_000
+DEFAULT_TODO_REPEAT_SECONDS = 300
+MIN_TODO_REPEAT_SECONDS = 10
+MAX_TODO_REPEAT_SECONDS = 86_400

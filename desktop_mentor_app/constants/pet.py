@@ -1,0 +1,26 @@
+"""Desktop-pet interaction defaults."""
+from __future__ import annotations
+
+DEFAULT_PET_SIZE = 220
+MIN_PET_SIZE = 72
+MAX_PET_SIZE = 560
+
+DEFAULT_CLICK_MESSAGE = "我在。把目标和卡点说清楚，我们先找下一步。"
+DEFAULT_IDLE_MESSAGE = "进展怎么样？需要我帮你梳理一下下一步吗？"
+DEFAULT_DROP_MESSAGE = "文件我收到了。先看目标、约束和你最想解决的问题。"
+
+DEFAULT_MESSAGE_SECONDS = 3.2
+MIN_MESSAGE_SECONDS = 0.8
+MAX_MESSAGE_SECONDS = 60.0
+
+MIN_IDLE_SECONDS = 30
+MAX_IDLE_SECONDS = 86_400
+DEFAULT_IDLE_SECONDS = 30
+IDLE_CHECK_INTERVAL_MS = 5_000
+IDLE_MODE_LIGHT = "light"
+IDLE_MODE_FULLSCREEN = "fullscreen"
+DEFAULT_IDLE_MODE = IDLE_MODE_LIGHT
+IDLE_MODE_OPTIONS = (
+    (IDLE_MODE_LIGHT, "轻量气泡"),
+    (IDLE_MODE_FULLSCREEN, "满屏提醒"),
+)

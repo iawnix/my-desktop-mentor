@@ -3,7 +3,7 @@ from __future__ import annotations
 
 import time
 
-from ..constants import DEFAULT_TODO_REPEAT_SECONDS, MAX_TODO_REPEAT_SECONDS, MIN_TODO_REPEAT_SECONDS
+from ..constants.todos import DEFAULT_TODO_REPEAT_SECONDS, MAX_TODO_REPEAT_SECONDS, MIN_TODO_REPEAT_SECONDS
 from ..cron.scheduler import reschedule_due_items
 from ..state.todos import due_todos, load_todos, remove_todos_by_ids, save_todos
 

@@ -6,13 +6,8 @@ import logging
 import time
 from typing import TYPE_CHECKING
 
-from ..constants import (
-    DEFAULT_IDLE_MESSAGE,
-    DEFAULT_MODEL,
-    DEFAULT_PERSONALITY_PROMPT,
-    MAX_AGENT_REPLY_CHARS,
-    MAX_AGENT_REPLY_TOKENS,
-)
+from ..constants.model import DEFAULT_MODEL, DEFAULT_PERSONALITY_PROMPT, MAX_AGENT_REPLY_CHARS, MAX_AGENT_REPLY_TOKENS
+from ..constants.pet import DEFAULT_IDLE_MESSAGE
 from .base import ModelClient, SyncModelClient
 from .openai_compatible import OpenAICompatibleModelClient
 

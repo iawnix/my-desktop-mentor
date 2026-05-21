@@ -7,7 +7,7 @@ from pathlib import Path
 from PySide6.QtCore import QRectF, Qt
 from PySide6.QtGui import QImage, QPixmap
 
-from ..constants import STICKER_ACTION_IDLE, STICKER_ACTIONS, STICKER_ALPHA_THRESHOLD
+from ..constants.stickers import STICKER_ACTION_IDLE, STICKER_ACTIONS, STICKER_ALPHA_THRESHOLD
 from .animation import normalized_sticker_speed, sticker_frame_interval_seconds
 
 

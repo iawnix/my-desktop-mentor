@@ -20,7 +20,7 @@ from PySide6.QtWidgets import (
     QWidget,
 )
 
-from ..constants import APP_NAME
+from ..constants.app import APP_NAME
 from ..state.conversations import ChatHistoryMessage, ConversationSession, format_session_time
 from .chat_components import ChatInputEdit, ChatMessageCard
 from .dialog_chrome import (

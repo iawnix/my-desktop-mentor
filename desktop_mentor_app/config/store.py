@@ -9,34 +9,29 @@ from dataclasses import asdict, dataclass, field
 from pathlib import Path
 
 from ..core.assets import DEFAULT_STICKERS_DIR
-from ..constants import (
-    APP_ID,
-    CONFIG_POINTER_NAME,
+from ..constants.app import APP_ID, CONFIG_POINTER_NAME
+from ..constants.control import DEFAULT_CONTROL_ENABLED, DEFAULT_CONTROL_WORKSPACE
+from ..constants.memory import DEFAULT_MEMORY_ENABLED, DEFAULT_MEMORY_TURNS, MAX_MEMORY_TURNS
+from ..constants.model import DEFAULT_MODEL, DEFAULT_PERSONALITY_PROMPT
+from ..constants.pet import (
     DEFAULT_CLICK_MESSAGE,
-    DEFAULT_CONTROL_ENABLED,
-    DEFAULT_CONTROL_WORKSPACE,
     DEFAULT_DROP_MESSAGE,
     DEFAULT_IDLE_MESSAGE,
     DEFAULT_IDLE_MODE,
     DEFAULT_IDLE_SECONDS,
-    DEFAULT_MEMORY_ENABLED,
-    DEFAULT_MEMORY_TURNS,
     DEFAULT_MESSAGE_SECONDS,
-    DEFAULT_MODEL,
-    DEFAULT_PERSONALITY_PROMPT,
-    DEFAULT_STICKER_ANIMATION_SPEED,
-    DEFAULT_TODO_REPEAT_SECONDS,
     IDLE_MODE_OPTIONS,
-    MAX_MEMORY_TURNS,
     MAX_IDLE_SECONDS,
     MAX_MESSAGE_SECONDS,
-    MAX_STICKER_ANIMATION_SPEED,
-    MAX_TODO_REPEAT_SECONDS,
     MIN_IDLE_SECONDS,
     MIN_MESSAGE_SECONDS,
-    MIN_STICKER_ANIMATION_SPEED,
-    MIN_TODO_REPEAT_SECONDS,
 )
+from ..constants.stickers import (
+    DEFAULT_STICKER_ANIMATION_SPEED,
+    MAX_STICKER_ANIMATION_SPEED,
+    MIN_STICKER_ANIMATION_SPEED,
+)
+from ..constants.todos import DEFAULT_TODO_REPEAT_SECONDS, MAX_TODO_REPEAT_SECONDS, MIN_TODO_REPEAT_SECONDS
 from ..pet.stickers import discover_sticker_sets, normalize_sticker_sets
 from .migration import CURRENT_CONFIG_SCHEMA_VERSION, backup_config_before_migration, migrate_config_data
 

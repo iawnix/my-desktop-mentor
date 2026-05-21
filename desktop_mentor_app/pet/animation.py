@@ -1,7 +1,7 @@
 """Sticker animation domain helpers."""
 from __future__ import annotations
 
-from ..constants import (
+from ..constants.stickers import (
     DEFAULT_STICKER_ANIMATION_SPEED,
     MAX_STICKER_ANIMATION_SPEED,
     MIN_STICKER_ANIMATION_SPEED,

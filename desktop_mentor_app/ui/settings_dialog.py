@@ -24,32 +24,29 @@ from PySide6.QtWidgets import (
 
 from ..config.store import AgentConfig, config_path
 from ..core.assets import DEFAULT_IMAGE
-from ..constants import (
-    APP_NAME,
+from ..constants.app import APP_NAME
+from ..constants.control import DEFAULT_CONTROL_ENABLED, DEFAULT_CONTROL_WORKSPACE
+from ..constants.memory import DEFAULT_MEMORY_TURNS, MAX_MEMORY_TURNS
+from ..constants.model import DEFAULT_MODEL, DEFAULT_PERSONALITY_PROMPT
+from ..constants.pet import (
     DEFAULT_CLICK_MESSAGE,
-    DEFAULT_CONTROL_ENABLED,
-    DEFAULT_CONTROL_WORKSPACE,
     DEFAULT_DROP_MESSAGE,
     DEFAULT_IDLE_MESSAGE,
     DEFAULT_IDLE_MODE,
     DEFAULT_IDLE_SECONDS,
-    DEFAULT_MEMORY_TURNS,
     DEFAULT_MESSAGE_SECONDS,
-    DEFAULT_MODEL,
-    DEFAULT_PERSONALITY_PROMPT,
-    DEFAULT_STICKER_ANIMATION_SPEED,
-    DEFAULT_TODO_REPEAT_SECONDS,
     IDLE_MODE_OPTIONS,
     MAX_IDLE_SECONDS,
-    MAX_MEMORY_TURNS,
     MAX_MESSAGE_SECONDS,
-    MAX_STICKER_ANIMATION_SPEED,
-    MAX_TODO_REPEAT_SECONDS,
     MIN_IDLE_SECONDS,
     MIN_MESSAGE_SECONDS,
-    MIN_STICKER_ANIMATION_SPEED,
-    MIN_TODO_REPEAT_SECONDS,
 )
+from ..constants.stickers import (
+    DEFAULT_STICKER_ANIMATION_SPEED,
+    MAX_STICKER_ANIMATION_SPEED,
+    MIN_STICKER_ANIMATION_SPEED,
+)
+from ..constants.todos import DEFAULT_TODO_REPEAT_SECONDS, MAX_TODO_REPEAT_SECONDS, MIN_TODO_REPEAT_SECONDS
 from .dialog_chrome import (
     activate_input_window,
     add_resize_grip,

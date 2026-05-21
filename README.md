@@ -158,6 +158,7 @@ python3 desktop_mentor.py --load-sticker-dir /path/to/stickers
 
 当前代码按 V2 分层组织：
 
+- `constants/`：按领域拆分的应用、模型、桌宠、贴纸、待办、记忆和控制默认值。
 - `core/`：qasync 运行时、后台任务执行器、日志和资源/图标辅助。
 - `config/`、`state/`：版本化配置迁移、本地会话、记忆和待办状态。
 - `model_client/`：OpenAI-compatible 模型客户端和 agent prompt/message 组装。
@@ -165,7 +166,7 @@ python3 desktop_mentor.py --load-sticker-dir /path/to/stickers
 - `pet/`、`cron/`、`platforms/`：桌宠动画、贴纸集合、聊天/控制服务、提醒调度、显示/输入/idle 平台适配和消息平台接口骨架；`pet/` 保持轻量懒加载，避免纯逻辑导入拉起 Qt 依赖。
 - `ui/`：Qt 界面、桌宠绘制、交互控制、对话窗口、Markdown 渲染和主题。`ui/dialogs.py` 保留为兼容导出入口，具体实现拆到 `chat_dialog.py`、`settings_dialog.py`、`todo_dialog.py` 等模块。
 
-包根目录只保留 `__init__.py` 和 `constants.py`。历史兼容入口已移除；真实实现统一位于 `model_client/`、`core/`、`config/`、`tools/`、`pet/`、`platforms/`、`state/` 和 `security/`，新增功能应直接依赖这些模块。
+包根目录只保留 `__init__.py`。历史兼容入口已移除；真实实现统一位于 `constants/`、`model_client/`、`core/`、`config/`、`tools/`、`pet/`、`platforms/`、`state/` 和 `security/`，新增功能应直接依赖这些模块。
 
 运行时日志写入配置目录下的：
 

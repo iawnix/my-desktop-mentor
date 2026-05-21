@@ -3,7 +3,7 @@ from __future__ import annotations
 
 from pathlib import Path
 
-from ..constants import MAX_STICKER_FRAMES, STICKER_ACTIONS, STICKER_IMAGE_SUFFIXES
+from ..constants.stickers import MAX_STICKER_FRAMES, STICKER_ACTIONS, STICKER_IMAGE_SUFFIXES
 
 
 def normalize_sticker_sets(value: object) -> dict[str, list[str]]:

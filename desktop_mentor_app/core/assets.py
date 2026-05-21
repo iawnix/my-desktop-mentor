@@ -10,7 +10,7 @@ from pathlib import Path
 from PySide6.QtCore import QByteArray, QBuffer, QIODevice, Qt
 from PySide6.QtGui import QImage, QPainter
 
-from ..constants import ICON_SIZES
+from ..constants.assets import ICON_SIZES
 
 
 def app_root() -> Path:

@@ -52,7 +52,15 @@ step() {
 step "Python syntax"
 "$PYTHON_FOR_COMPILE" -m py_compile \
   desktop_mentor.py \
-  desktop_mentor_app/constants.py \
+  desktop_mentor_app/constants/__init__.py \
+  desktop_mentor_app/constants/app.py \
+  desktop_mentor_app/constants/assets.py \
+  desktop_mentor_app/constants/control.py \
+  desktop_mentor_app/constants/memory.py \
+  desktop_mentor_app/constants/model.py \
+  desktop_mentor_app/constants/pet.py \
+  desktop_mentor_app/constants/stickers.py \
+  desktop_mentor_app/constants/todos.py \
   desktop_mentor_app/config/__init__.py \
   desktop_mentor_app/config/migration.py \
   desktop_mentor_app/config/store.py \
@@ -175,7 +183,9 @@ from desktop_mentor_app.state.conversations import append_chat_turn, build_conve
 from desktop_mentor_app.tools.executor import execute_control_plan
 from desktop_mentor_app.tools.registry import build_control_plan, build_control_plan_from_agent_reply, desktop_path
 from desktop_mentor_app.tools.types import PermissionLevel
-from desktop_mentor_app.constants import DEFAULT_CLICK_MESSAGE, DEFAULT_STICKER_ANIMATION_SPEED, DEFAULT_TODO_REPEAT_SECONDS, MAX_IDLE_SECONDS, MAX_PET_SIZE, MAX_STICKER_ANIMATION_SPEED, MIN_PET_SIZE, STICKER_ACTION_IDLE, STICKER_ACTION_TAP
+from desktop_mentor_app.constants.pet import DEFAULT_CLICK_MESSAGE, MAX_IDLE_SECONDS, MAX_PET_SIZE, MIN_PET_SIZE
+from desktop_mentor_app.constants.stickers import DEFAULT_STICKER_ANIMATION_SPEED, MAX_STICKER_ANIMATION_SPEED, STICKER_ACTION_IDLE, STICKER_ACTION_TAP
+from desktop_mentor_app.constants.todos import DEFAULT_TODO_REPEAT_SECONDS
 from desktop_mentor_app.tools.drop_context import DROP_CONTEXT_PROMPT_HEADER, collect_drop_context, compose_prompt_with_drop_context
 from desktop_mentor_app.platforms.input_method import configure_linux_input_method_environment, fcitx_qt_plugin_files, input_method_diagnostics, preferred_x11_display
 from desktop_mentor_app.pet.stickers import discover_sticker_sets
