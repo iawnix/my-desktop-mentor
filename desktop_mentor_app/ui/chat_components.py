@@ -97,7 +97,15 @@ if QWebEngineView is not None:
             self.sync_height_to_document()
 
         def sync_height_to_document(self) -> None:
-            script = "Math.ceil(document.documentElement.scrollHeight || document.body.scrollHeight || 24)"
+            script = """
+(() => {
+  const root = document.documentElement;
+  const body = document.body;
+  const rootHeight = root ? root.scrollHeight : 0;
+  const bodyHeight = body ? body.scrollHeight : 0;
+  return Math.ceil(Math.max(rootHeight, bodyHeight, 24));
+})()
+"""
             try:
                 self.page().runJavaScript(script, self._apply_document_height)
             except RuntimeError:
