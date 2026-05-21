@@ -264,7 +264,7 @@ print(f"[desktop-mentor] XMODIFIERS: {os.environ.get('XMODIFIERS', '')}", file=s
 print(f"[desktop-mentor] GTK_IM_MODULE: {os.environ.get('GTK_IM_MODULE', '')}", file=sys.stderr)
 print(f"[desktop-mentor] DBUS_SESSION_BUS_ADDRESS: {os.environ.get('DBUS_SESSION_BUS_ADDRESS', '')}", file=sys.stderr)
 try:
-    from desktop_mentor_app.input_method import configure_qt_input_method_runtime, input_method_diagnostics
+    from desktop_mentor_app.platforms.input_method import configure_qt_input_method_runtime, input_method_diagnostics
 
     configure_qt_input_method_runtime()
     diag = input_method_diagnostics()

@@ -22,8 +22,8 @@ from PySide6.QtWidgets import (
     QWidget,
 )
 
-from ..assets import DEFAULT_IMAGE
-from ..config_store import AgentConfig, config_path
+from ..config.store import AgentConfig, config_path
+from ..core.assets import DEFAULT_IMAGE
 from ..constants import (
     APP_NAME,
     DEFAULT_CLICK_MESSAGE,

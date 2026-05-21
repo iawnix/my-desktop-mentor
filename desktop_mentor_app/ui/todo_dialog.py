@@ -20,7 +20,7 @@ from PySide6.QtWidgets import (
     QWidget,
 )
 
-from ..assets import TODO_BADGE_IMAGE
+from ..core.assets import TODO_BADGE_IMAGE
 from ..state.todos import format_due_time, load_todos_from_items
 from .dialog_chrome import (
     activate_input_window,

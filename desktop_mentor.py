@@ -8,7 +8,7 @@ import os
 import sys
 from pathlib import Path
 
-from desktop_mentor_app.input_method import (
+from desktop_mentor_app.platforms.input_method import (
     configure_linux_input_method_environment,
     configure_qt_input_method_runtime,
     input_method_diagnostics,
@@ -18,15 +18,15 @@ configure_linux_input_method_environment()
 
 from PySide6.QtWidgets import QApplication
 
-from desktop_mentor_app.assets import DEFAULT_IMAGE, convert_image_to_ico, ensure_default_icon
-from desktop_mentor_app.config_store import chat_history_path, load_config, memory_path, save_config, todos_path
+from desktop_mentor_app.config.store import chat_history_path, load_config, memory_path, save_config, todos_path
+from desktop_mentor_app.core.assets import DEFAULT_IMAGE, convert_image_to_ico, ensure_default_icon
 from desktop_mentor_app.security.audit import audit_log_path
 from desktop_mentor_app.core.runtime import run_qt_app
 from desktop_mentor_app.constants import APP_NAME, DEFAULT_CLICK_MESSAGE, DEFAULT_PET_SIZE
-from desktop_mentor_app.logging_config import app_log_path, configure_logging
+from desktop_mentor_app.core.logging import app_log_path, configure_logging
 from desktop_mentor_app.pet.idle_manager import IdleManager
 from desktop_mentor_app.platforms.display import prefer_movable_linux_platform
-from desktop_mentor_app.stickers import discover_sticker_sets, sticker_frame_counts
+from desktop_mentor_app.pet.stickers import discover_sticker_sets, sticker_frame_counts
 from desktop_mentor_app.ui.theme import apply_app_theme
 from desktop_mentor_app.ui.pet_widget import DesktopMentorPet
 

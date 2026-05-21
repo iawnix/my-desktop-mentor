@@ -7,7 +7,7 @@ import time
 from collections.abc import Iterable
 from pathlib import Path
 
-from ..config_store import todos_path
+from ..config.store import todos_path
 
 LOGGER = logging.getLogger(__name__)
 

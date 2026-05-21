@@ -56,15 +56,21 @@ step "Python syntax"
   desktop_mentor_app/logging_config.py \
   desktop_mentor_app/config/__init__.py \
   desktop_mentor_app/config/migration.py \
+  desktop_mentor_app/config/store.py \
   desktop_mentor_app/core/__init__.py \
+  desktop_mentor_app/core/assets.py \
+  desktop_mentor_app/core/logging.py \
   desktop_mentor_app/core/runtime.py \
   desktop_mentor_app/core/task_runner.py \
   desktop_mentor_app/model_client/__init__.py \
+  desktop_mentor_app/model_client/agent.py \
   desktop_mentor_app/model_client/base.py \
   desktop_mentor_app/model_client/openai_compatible.py \
   desktop_mentor_app/platforms/__init__.py \
   desktop_mentor_app/platforms/base.py \
   desktop_mentor_app/platforms/display.py \
+  desktop_mentor_app/platforms/idle.py \
+  desktop_mentor_app/platforms/input_method.py \
   desktop_mentor_app/platforms/registry.py \
   desktop_mentor_app/platforms/whatsapp.py \
   desktop_mentor_app/state/__init__.py \
@@ -77,6 +83,7 @@ step "Python syntax"
   desktop_mentor_app/tools/__init__.py \
   desktop_mentor_app/tools/base.py \
   desktop_mentor_app/tools/command_parser.py \
+  desktop_mentor_app/tools/drop_context.py \
   desktop_mentor_app/tools/executor.py \
   desktop_mentor_app/tools/natural_language.py \
   desktop_mentor_app/tools/path_parser.py \
@@ -90,6 +97,7 @@ step "Python syntax"
   desktop_mentor_app/pet/chat_manager.py \
   desktop_mentor_app/pet/idle_manager.py \
   desktop_mentor_app/pet/sticker_manager.py \
+  desktop_mentor_app/pet/stickers.py \
   desktop_mentor_app/pet/todo_manager.py \
   desktop_mentor_app/config_store.py \
   desktop_mentor_app/input_method.py \
@@ -120,6 +128,7 @@ step "Python syntax"
   desktop_mentor_app/ui/settings_dialog.py \
   desktop_mentor_app/ui/sticker_set_editor.py \
   desktop_mentor_app/ui/text_view_dialog.py \
+  desktop_mentor_app/ui/tray_controller.py \
   desktop_mentor_app/ui/todo_dialog.py \
   packaging/windows/desktop_mentor.spec
 
@@ -174,18 +183,18 @@ from PySide6.QtCore import QEvent, Qt
 from PySide6.QtGui import QKeyEvent, QTextCursor
 from PySide6.QtWidgets import QApplication, QFrame, QMenu, QPushButton, QScrollArea, QWidget
 
-from desktop_mentor_app import config_store
-from desktop_mentor_app.agent_client import agent_system_prompt, call_agent_async, compact_text, limit_formatted_text
-from desktop_mentor_app.assets import DEFAULT_IMAGE, DEFAULT_STICKERS_DIR, ROOT
-from desktop_mentor_app.config_store import AgentConfig, new_default_config
+from desktop_mentor_app.config import store as config_store
+from desktop_mentor_app.model_client.agent import agent_system_prompt, call_agent_async, compact_text, limit_formatted_text
+from desktop_mentor_app.core.assets import DEFAULT_IMAGE, DEFAULT_STICKERS_DIR, ROOT
+from desktop_mentor_app.config.store import AgentConfig, new_default_config
 from desktop_mentor_app.control import PermissionLevel
 from desktop_mentor_app.state.conversations import append_chat_turn, build_conversation_memory_context, clear_chat_history, create_conversation_session, load_chat_history, list_conversation_sessions
 from desktop_mentor_app.tools.executor import execute_control_plan
 from desktop_mentor_app.tools.registry import build_control_plan, build_control_plan_from_agent_reply, desktop_path
 from desktop_mentor_app.constants import DEFAULT_CLICK_MESSAGE, DEFAULT_STICKER_ANIMATION_SPEED, DEFAULT_TODO_REPEAT_SECONDS, MAX_IDLE_SECONDS, MAX_PET_SIZE, MAX_STICKER_ANIMATION_SPEED, MIN_PET_SIZE, STICKER_ACTION_IDLE, STICKER_ACTION_TAP
-from desktop_mentor_app.drop_context import DROP_CONTEXT_PROMPT_HEADER, collect_drop_context, compose_prompt_with_drop_context
-from desktop_mentor_app.input_method import configure_linux_input_method_environment, fcitx_qt_plugin_files, input_method_diagnostics, preferred_x11_display
-from desktop_mentor_app.stickers import discover_sticker_sets
+from desktop_mentor_app.tools.drop_context import DROP_CONTEXT_PROMPT_HEADER, collect_drop_context, compose_prompt_with_drop_context
+from desktop_mentor_app.platforms.input_method import configure_linux_input_method_environment, fcitx_qt_plugin_files, input_method_diagnostics, preferred_x11_display
+from desktop_mentor_app.pet.stickers import discover_sticker_sets
 from desktop_mentor_app.state.todos import load_todos, save_todos
 from desktop_mentor_app.ui.dialogs import ChatDialog, SettingsDialog, TodoDialog, prepare_modern_menu
 from desktop_mentor_app.ui.markdown_rendering import normalize_model_markdown, render_markdown_fragment

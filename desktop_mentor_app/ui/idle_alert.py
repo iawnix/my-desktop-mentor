@@ -5,7 +5,7 @@ from PySide6.QtCore import QEvent, QRect, QRectF, QTimer, Qt
 from PySide6.QtGui import QColor, QFont, QGuiApplication, QMouseEvent, QPainter
 from PySide6.QtWidgets import QWidget
 
-from ..agent_client import compact_text
+from ..model_client.agent import compact_text
 from .tokens import FULLSCREEN_ALERT_DURATION_MS
 
 

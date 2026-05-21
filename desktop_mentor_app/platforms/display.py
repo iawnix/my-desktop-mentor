@@ -6,7 +6,7 @@ import subprocess
 import sys
 from pathlib import Path
 
-from ..input_method import preferred_x11_display
+from .input_method import preferred_x11_display
 
 
 def qt_platform_can_start(platform: str, *, python_executable: str | None = None) -> bool:

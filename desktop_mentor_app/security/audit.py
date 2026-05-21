@@ -12,7 +12,7 @@ LOGGER = logging.getLogger(__name__)
 
 
 def audit_log_path() -> Path:
-    from ..config_store import config_path
+    from ..config.store import config_path
 
     return config_path().parent / "control" / "audit.jsonl"
 

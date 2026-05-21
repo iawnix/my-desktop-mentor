@@ -6,7 +6,7 @@ from pathlib import Path
 from PySide6.QtWidgets import QFileDialog, QHBoxLayout, QLabel, QPushButton, QTextEdit, QVBoxLayout, QWidget
 
 from ..constants import MAX_STICKER_FRAMES, STICKER_ACTION_LABELS, STICKER_ACTIONS, STICKER_IMAGE_FILTER
-from ..stickers import discover_sticker_sets, normalize_sticker_sets
+from ..pet.stickers import discover_sticker_sets, normalize_sticker_sets
 from .dialog_chrome import make_transparent, mark_button, styled_label
 
 

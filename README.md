@@ -158,14 +158,14 @@ python3 desktop_mentor.py --load-sticker-dir /path/to/stickers
 
 当前代码按 V2 分层组织：
 
-- `core/`：qasync 运行时、后台任务执行器和应用编排。
+- `core/`：qasync 运行时、后台任务执行器、日志和资源/图标辅助。
 - `config/`、`state/`：版本化配置迁移、本地会话、记忆和待办状态。
-- `model_client/`：OpenAI-compatible 模型客户端。
-- `tools/`、`security/`：工具计划、命令解析、自然语言解析、执行、权限策略和审计。
-- `pet/`、`cron/`、`platforms/`：桌宠动画、聊天/控制服务、提醒调度和消息平台接口骨架；`pet/` 保持轻量懒加载，避免纯逻辑导入拉起 Qt 依赖。
+- `model_client/`：OpenAI-compatible 模型客户端和 agent prompt/message 组装。
+- `tools/`、`security/`：工具计划、命令解析、拖放文件上下文、自然语言解析、执行、权限策略和审计。
+- `pet/`、`cron/`、`platforms/`：桌宠动画、贴纸集合、聊天/控制服务、提醒调度、显示/输入/idle 平台适配和消息平台接口骨架；`pet/` 保持轻量懒加载，避免纯逻辑导入拉起 Qt 依赖。
 - `ui/`：Qt 界面、桌宠绘制、交互控制、对话窗口、Markdown 渲染和主题。`ui/dialogs.py` 保留为兼容导出入口，具体实现拆到 `chat_dialog.py`、`settings_dialog.py`、`todo_dialog.py` 等模块。
 
-旧的 `conversation_store.py`、`todo_store.py` 和 `control/*` 路径保留为兼容入口，真实实现位于 `state/`、`tools/` 和 `security/`。
+包根目录只保留入口、常量和旧路径兼容导出。旧的 `agent_client.py`、`assets.py`、`config_store.py`、`drop_context.py`、`idle_detector.py`、`input_method.py`、`logging_config.py`、`stickers.py`、`conversation_store.py`、`todo_store.py` 和 `control/*` 路径保留为兼容入口，真实实现位于 `model_client/`、`core/`、`config/`、`tools/`、`pet/`、`platforms/`、`state/` 和 `security/`。
 
 运行时日志写入配置目录下的：
 

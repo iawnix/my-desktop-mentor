@@ -15,7 +15,7 @@ from ..constants import (
     STICKER_ACTION_DRAG,
     STICKER_ACTION_DROP_FILE,
 )
-from ..drop_context import collect_drop_context
+from ..tools.drop_context import collect_drop_context
 from .dialog_chrome import prepare_modern_menu
 from .pointer_events import as_context_menu_pos, as_global_pos, as_local_pos
 from .tokens import (

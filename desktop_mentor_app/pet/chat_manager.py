@@ -4,8 +4,8 @@ from __future__ import annotations
 import logging
 from dataclasses import dataclass
 
-from ..agent_client import call_agent_async
-from ..config_store import AgentConfig
+from ..config.store import AgentConfig
+from ..model_client.agent import call_agent_async
 from ..model_client.base import ModelClient
 from ..state.conversations import (
     append_chat_turn,

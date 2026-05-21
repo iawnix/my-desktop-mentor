@@ -23,3 +23,17 @@ class ModelClient(Protocol):
         temperature: float,
     ) -> ModelResponse:
         """Return a chat completion response."""
+
+
+class SyncModelClient(Protocol):
+    def complete_sync(
+        self,
+        *,
+        url: str,
+        api_key: str,
+        model: str,
+        messages: list[dict[str, str]],
+        max_tokens: int,
+        temperature: float,
+    ) -> ModelResponse:
+        """Return a chat completion response from synchronous code."""

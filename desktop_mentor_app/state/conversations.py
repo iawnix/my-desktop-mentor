@@ -8,7 +8,7 @@ import time
 from dataclasses import dataclass, field
 from pathlib import Path
 
-from ..config_store import chat_history_path, config_path, memory_path
+from ..config.store import chat_history_path, config_path, memory_path
 
 LOGGER = logging.getLogger(__name__)
 

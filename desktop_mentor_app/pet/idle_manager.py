@@ -5,7 +5,7 @@ import time
 from collections.abc import Callable
 from typing import Any
 
-from ..idle_detector import idle_detection_diagnostics, system_idle_seconds
+from ..platforms.idle import idle_detection_diagnostics, system_idle_seconds
 
 IdleProvider = Callable[[], float | None]
 DiagnosticsProvider = Callable[[], dict[str, Any]]
