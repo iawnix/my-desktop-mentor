@@ -36,10 +36,31 @@ scripts\windows\setup_conda_env.bat
 Linux 安装脚本常用选项：
 
 ```bash
+bash install_linux.sh --conda /path/to/conda
 bash install_linux.sh --env-prefix "$PWD/.conda"
+bash install_linux.sh --env-name my-desktop-mentor
 bash install_linux.sh --python-version 3.12
+bash install_linux.sh --input-method auto
+bash install_linux.sh --qt-platform auto
 bash install_linux.sh --no-deps
 bash install_linux.sh --dry-run
+```
+
+安装脚本默认会自动探测当前机器的输入法和桌面环境，再生成 `.desktop`：
+
+- 输入法：`auto`、`fcitx`、`ibus`、`none`
+- Qt 平台：`auto`、`xcb`、`wayland`、`none`
+- Conda：可用 `--conda /path/to/conda` 指定用户自己的 Conda 可执行文件
+- 环境：可用 `--env-prefix /path/to/env` 创建路径环境，或 `--env-name name` 创建命名环境
+
+例如用户已经安装了 Miniconda，想创建命名环境并适配 Wayland + IBus：
+
+```bash
+bash install_linux.sh \
+  --conda "$HOME/miniconda3/bin/conda" \
+  --env-name my-desktop-mentor \
+  --input-method ibus \
+  --qt-platform wayland
 ```
 
 如果只想安装或修复 Conda 依赖，不写入桌面启动器：
@@ -71,6 +92,12 @@ conda run -n my-desktop-mentor python -m pip install -r requirements.txt
 ```bash
 cd my-desktop-mentor
 bash install_linux.sh
+```
+
+如果自动探测不符合当前桌面环境，可以重新生成 `.desktop`，不重新安装依赖：
+
+```bash
+bash install_linux.sh --no-deps --input-method fcitx --qt-platform xcb
 ```
 
 启动：
