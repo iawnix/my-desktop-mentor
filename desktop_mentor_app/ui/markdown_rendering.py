@@ -16,7 +16,26 @@ _FENCE_WITH_SAME_LINE_CODE_RE = re.compile(
 )
 _FENCE_WITH_SAME_LINE_TEXT_RE = re.compile(r"(```+|~~~+)[ \t]+(?=\S)")
 _BLOCK_MATH_RE = re.compile(r"(?<!\\)\$\$(.+?)(?<!\\)\$\$", re.DOTALL)
+_BRACKET_MATH_RE = re.compile(r"(?<!\\)\\\[(.+?)(?<!\\)\\\]", re.DOTALL)
 _INLINE_MATH_RE = re.compile(r"(?<!\\)\$(?![\s$])(.+?)(?<![\s\\])\$(?!\d)", re.DOTALL)
+_PAREN_MATH_RE = re.compile(r"(?<!\\)\\\((.+?)(?<!\\)\\\)", re.DOTALL)
+
+
+def _is_table_separator(line: str) -> bool:
+    stripped = line.strip().strip("|")
+    if "|" not in line or not stripped:
+        return False
+    cells = [cell.strip() for cell in stripped.split("|")]
+    return len(cells) >= 2 and all(re.fullmatch(r":?-{3,}:?", cell or "") for cell in cells)
+
+
+def _looks_like_table_row(line: str) -> bool:
+    stripped = line.strip()
+    return bool(stripped) and "|" in stripped and not _FENCE_RE.match(stripped)
+
+
+def _split_table_row(line: str) -> list[str]:
+    return [cell.strip() for cell in line.strip().strip("|").split("|")]
 
 
 def _highlight_code(code: str, language: str, _attrs: str = "") -> str:
@@ -63,12 +82,34 @@ def _math_to_html(source: str, display: bool) -> str:
 
 def normalize_model_markdown(markdown: str) -> str:
     normalized = str(markdown or "").replace("\r\n", "\n").replace("\r", "\n").strip()
-    if "```" not in normalized and "~~~" not in normalized:
-        return normalized
-    normalized = _INLINE_FENCE_RE.sub(r"\n\1", normalized)
-    normalized = _FENCE_WITH_SAME_LINE_CODE_RE.sub(r"\1\2\n", normalized)
-    normalized = _FENCE_WITH_SAME_LINE_TEXT_RE.sub(r"\1\n", normalized)
-    return normalized.strip()
+    if "```" in normalized or "~~~" in normalized:
+        normalized = _INLINE_FENCE_RE.sub(r"\n\1", normalized)
+        normalized = _FENCE_WITH_SAME_LINE_CODE_RE.sub(r"\1\2\n", normalized)
+        normalized = _FENCE_WITH_SAME_LINE_TEXT_RE.sub(r"\1\n", normalized)
+    return _normalize_model_tables(normalized).strip()
+
+
+def _normalize_model_tables(markdown: str) -> str:
+    lines = markdown.split("\n")
+    normalized: list[str] = []
+    in_fence: str | None = None
+    for index, line in enumerate(lines):
+        fence_match = _FENCE_RE.match(line)
+        if in_fence:
+            normalized.append(line)
+            if fence_match and fence_match.group(1).startswith(in_fence):
+                in_fence = None
+            continue
+        if fence_match:
+            in_fence = fence_match.group(1)[0]
+            normalized.append(line)
+            continue
+        next_line = lines[index + 1] if index + 1 < len(lines) else ""
+        starts_table = _looks_like_table_row(line) and _is_table_separator(next_line)
+        if starts_table and normalized and normalized[-1].strip() and not _looks_like_table_row(normalized[-1]):
+            normalized.append("")
+        normalized.append(line)
+    return "\n".join(normalized)
 
 
 def _replace_math_in_text(text: str, add_replacement: Callable[[str, bool], str]) -> str:
@@ -79,7 +120,9 @@ def _replace_math_in_text(text: str, add_replacement: Callable[[str, bool], str]
         return add_replacement(match.group(1), False)
 
     text = _BLOCK_MATH_RE.sub(block_replacer, text)
-    return _INLINE_MATH_RE.sub(inline_replacer, text)
+    text = _BRACKET_MATH_RE.sub(block_replacer, text)
+    text = _INLINE_MATH_RE.sub(inline_replacer, text)
+    return _PAREN_MATH_RE.sub(inline_replacer, text)
 
 
 def _render_inline_fallback(text: str) -> str:
@@ -119,6 +162,21 @@ def _render_markdown_fallback(markdown: str) -> str:
                 code_lines.append(lines[index])
                 index += 1
             blocks.append(_highlight_code("\n".join(code_lines), language))
+        elif _looks_like_table_row(line) and index + 1 < len(lines) and _is_table_separator(lines[index + 1]):
+            _flush_paragraph(paragraph_lines, blocks)
+            headers = _split_table_row(line)
+            rows: list[list[str]] = []
+            index += 2
+            while index < len(lines) and _looks_like_table_row(lines[index]):
+                rows.append(_split_table_row(lines[index]))
+                index += 1
+            header_html = "".join(f"<th>{_render_inline_fallback(cell)}</th>" for cell in headers)
+            body_html = "".join(
+                "<tr>" + "".join(f"<td>{_render_inline_fallback(cell)}</td>" for cell in row) + "</tr>"
+                for row in rows
+            )
+            blocks.append(f"<table><thead><tr>{header_html}</tr></thead><tbody>{body_html}</tbody></table>")
+            continue
         elif not line.strip():
             _flush_paragraph(paragraph_lines, blocks)
         elif line.lstrip().startswith(("- ", "* ")):

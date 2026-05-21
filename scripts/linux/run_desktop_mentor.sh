@@ -141,7 +141,13 @@ python_can_run_app() {
   local candidate="$1"
   [[ -n "$candidate" ]] || return 1
   ATTEMPTED+=("$candidate")
-  "$candidate" -c "from PySide6.QtCore import Qt" >/dev/null 2>&1
+  "$candidate" - <<'PY' >/dev/null 2>&1
+from PySide6.QtCore import Qt
+from PySide6.QtWebEngineWidgets import QWebEngineView
+import latex2mathml
+import markdown_it
+import pygments
+PY
 }
 
 add_candidate() {
@@ -208,12 +214,12 @@ else
 fi
 
 if [[ -z "${PYTHON_BIN:-}" ]]; then
-  printf '[desktop-mentor] No Python interpreter with PySide6.QtCore was found.\n' >&2
+  printf '[desktop-mentor] No Python interpreter with the required Qt/Markdown rendering dependencies was found.\n' >&2
   printf '[desktop-mentor] Tried:\n' >&2
   for candidate in "${ATTEMPTED[@]}"; do
     printf '  - %s\n' "$candidate" >&2
   done
-  printf '[desktop-mentor] Set DESKTOP_MENTOR_PYTHON=/path/to/python or install PySide6.\n' >&2
+  printf '[desktop-mentor] Set DESKTOP_MENTOR_PYTHON=/path/to/python or install requirements.txt.\n' >&2
   exit 1
 fi
 
@@ -254,6 +260,12 @@ except Exception as exc:
 print(f"[desktop-mentor] python version: {sys.version.split()[0]}", file=sys.stderr)
 print(f"[desktop-mentor] PySide6 path: {pyside_path}", file=sys.stderr)
 print(f"[desktop-mentor] Qt version: {qt_version}", file=sys.stderr)
+for module_name in ("PySide6.QtWebEngineWidgets", "markdown_it", "latex2mathml", "pygments"):
+    try:
+        module = __import__(module_name, fromlist=["*"])
+        print(f"[desktop-mentor] {module_name}: {getattr(module, '__file__', 'built-in')}", file=sys.stderr)
+    except Exception as exc:
+        print(f"[desktop-mentor] {module_name}: unavailable: {type(exc).__name__}: {exc}", file=sys.stderr)
 print(f"[desktop-mentor] QT_QPA_PLATFORM: {os.environ.get('QT_QPA_PLATFORM', '')}", file=sys.stderr)
 print(f"[desktop-mentor] DISPLAY: {os.environ.get('DISPLAY', '')}", file=sys.stderr)
 print(f"[desktop-mentor] WAYLAND_DISPLAY: {os.environ.get('WAYLAND_DISPLAY', '')}", file=sys.stderr)

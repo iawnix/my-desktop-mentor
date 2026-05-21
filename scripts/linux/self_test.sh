@@ -32,7 +32,13 @@ if [[ -z "$PYTHON_FOR_QT" ]]; then
     [[ -x "$candidate" ]] && CANDIDATES+=("$candidate")
   done
   for candidate in "${CANDIDATES[@]}"; do
-    if "$candidate" -c "from PySide6.QtCore import Qt" >/dev/null 2>&1; then
+    if "$candidate" - <<'PY' >/dev/null 2>&1; then
+from PySide6.QtCore import Qt
+from PySide6.QtWebEngineWidgets import QWebEngineView
+import latex2mathml
+import markdown_it
+import pygments
+PY
       PYTHON_FOR_QT="$candidate"
       break
     fi
@@ -40,8 +46,8 @@ if [[ -z "$PYTHON_FOR_QT" ]]; then
 fi
 
 if [[ -z "$PYTHON_FOR_QT" ]]; then
-  echo "[self-test] No Python interpreter with PySide6.QtCore was found." >&2
-  echo "[self-test] Set DESKTOP_MENTOR_PYTHON=/path/to/python or install PySide6." >&2
+  echo "[self-test] No Python interpreter with the required Qt/Markdown rendering dependencies was found." >&2
+  echo "[self-test] Set DESKTOP_MENTOR_PYTHON=/path/to/python or install requirements.txt." >&2
   exit 1
 fi
 
@@ -211,7 +217,7 @@ assert all(len(paths) == 16 for paths in default_config.sticker_sets.values()), 
 assert len(default_config.sticker_sets) == 8, default_config.sticker_sets
 chat = ChatDialog()
 context_chat = ChatDialog(context_hint="文件上下文：README.md")
-markdown_sample = "**结论**\n\n- Markdown 列表\n\n```python\nprint('ok')\n```\n\n$$E=mc^2$$"
+markdown_sample = "**结论**\n\n- Markdown 列表\n\n```python\nprint('ok')\n```\n\n$$E=mc^2$$\n\n\\[\\int_0^1 x^2 dx = \\frac{1}{3}\\]\n\n- 表格：\n| 参数 | 值 |\n|---|---|\n| a | 1 |"
 chat.add_assistant_message(markdown_sample)
 markdown_views = chat.findChildren(QWidget, "chatMarkdownMessage")
 assert markdown_views, "assistant replies should render through a Markdown message view"
@@ -220,6 +226,8 @@ assert assistant_cards, "assistant replies should be wrapped in a message card"
 rendered_markdown = render_markdown_fragment(markdown_sample)
 assert "codehilite" in rendered_markdown, rendered_markdown
 assert "math-block" in rendered_markdown, rendered_markdown
+assert rendered_markdown.count("<math") >= 2, rendered_markdown
+assert "<table>" in rendered_markdown, rendered_markdown
 assert "<math" in rendered_markdown, rendered_markdown
 assert "```" not in rendered_markdown, rendered_markdown
 collapsed_fence = "说明。 ```python import asyncio ```"
