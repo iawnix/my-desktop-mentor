@@ -192,6 +192,8 @@ step "Unit tests"
 PYTHONPATH="$ROOT_DIR" "$PYTHON_FOR_QT" -m unittest discover -s tests
 
 step "Linux launcher syntax"
+bash -n install_linux.sh
+bash -n scripts/linux/install_desktop_mentor.sh
 bash -n scripts/linux/run_desktop_mentor.sh
 bash -n scripts/linux/self_test.sh
 bash -n scripts/linux/setup_conda_env.sh

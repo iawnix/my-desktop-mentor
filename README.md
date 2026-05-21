@@ -21,16 +21,31 @@ PySide6 桌面导师 / 桌宠应用。它以透明置顶贴纸停留在桌面上
 - Python 3.11+（推荐由 Conda 环境提供）
 - PySide6 6.5+
 
-推荐创建项目本地 Conda 环境。默认环境路径为项目目录下的 `.conda/`，这样 rofi、`.desktop`、Windows 快捷方式启动时不依赖终端里已经 `conda activate`。
+Linux 推荐直接运行用户级安装脚本。它会创建项目本地 Conda 环境、安装依赖，并把实际路径的桌面启动器写入 `~/.local/share/applications/`，这样 rofi 可以直接启动。
 
 ```bash
-./scripts/linux/setup_conda_env.sh
+bash install_linux.sh
 ```
 
 Windows:
 
 ```bat
 scripts\windows\setup_conda_env.bat
+```
+
+Linux 安装脚本常用选项：
+
+```bash
+bash install_linux.sh --env-prefix "$PWD/.conda"
+bash install_linux.sh --python-version 3.12
+bash install_linux.sh --no-deps
+bash install_linux.sh --dry-run
+```
+
+如果只想安装或修复 Conda 依赖，不写入桌面启动器：
+
+```bash
+./scripts/linux/setup_conda_env.sh
 ```
 
 也可以手动创建命名环境：
@@ -50,6 +65,13 @@ conda run -n my-desktop-mentor python -m pip install -r requirements.txt
 - `.venv/` 和系统 Python 作为兜底
 
 ## Linux 使用
+
+首次安装：
+
+```bash
+cd my-desktop-mentor
+bash install_linux.sh
+```
 
 启动：
 
@@ -95,7 +117,11 @@ Linux 桌面启动模板：
 packaging/linux/desktop_mentor.desktop
 ```
 
-复制到 `~/.local/share/applications/` 前，按实际路径修改 `Exec` 和 `Icon`。
+一般不需要手动复制模板，`bash install_linux.sh` 会生成带实际路径的：
+
+```text
+~/.local/share/applications/desktop_mentor.desktop
+```
 
 如果使用 rofi 启动，先确认桌面文件可见：
 
