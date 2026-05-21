@@ -5,14 +5,68 @@ SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 ROOT_DIR="$(cd "$SCRIPT_DIR/../.." && pwd)"
 cd "$ROOT_DIR"
 
+find_conda_exe() {
+  if [[ -n "${CONDA_EXE:-}" && -x "${CONDA_EXE:-}" ]]; then
+    printf '%s\n' "$CONDA_EXE"
+    return 0
+  fi
+  if command -v conda >/dev/null 2>&1; then
+    command -v conda
+    return 0
+  fi
+  for candidate in "$HOME"/soft/conda/*/bin/conda "$HOME"/miniconda*/bin/conda "$HOME"/anaconda*/bin/conda; do
+    if [[ -x "$candidate" ]]; then
+      printf '%s\n' "$candidate"
+      return 0
+    fi
+  done
+  return 1
+}
+
+add_candidate() {
+  local candidate="$1"
+  [[ -n "$candidate" ]] || return 0
+  [[ -x "$candidate" ]] || return 0
+  CANDIDATES+=("$candidate")
+}
+
+add_conda_python_candidates() {
+  local env_name env_prefix conda_exe conda_base env_root
+  env_name="${DESKTOP_MENTOR_CONDA_ENV_NAME:-my-desktop-mentor}"
+  env_prefix="${DESKTOP_MENTOR_CONDA_PREFIX:-$ROOT_DIR/.conda}"
+
+  add_candidate "$env_prefix/bin/python"
+  [[ -n "${CONDA_PREFIX:-}" ]] && add_candidate "$CONDA_PREFIX/bin/python"
+
+  conda_exe="$(find_conda_exe || true)"
+  if [[ -n "$conda_exe" ]]; then
+    conda_base="$("$conda_exe" info --base 2>/dev/null || true)"
+    [[ -n "$conda_base" ]] && add_candidate "$conda_base/envs/$env_name/bin/python"
+  fi
+
+  for env_root in "$HOME"/soft/conda/*/envs "$HOME"/miniconda*/envs "$HOME"/anaconda*/envs; do
+    add_candidate "$env_root/$env_name/bin/python"
+  done
+}
+
 PYTHON_FOR_COMPILE="${DESKTOP_MENTOR_PYTHON:-}"
 if [[ -z "$PYTHON_FOR_COMPILE" ]]; then
-  if command -v python3 >/dev/null 2>&1; then
-    PYTHON_FOR_COMPILE="$(command -v python3)"
-  elif command -v python >/dev/null 2>&1; then
-    PYTHON_FOR_COMPILE="$(command -v python)"
-  else
-    echo "[self-test] No python3/python found for syntax checks." >&2
+  CANDIDATES=()
+  add_conda_python_candidates
+  add_candidate "$ROOT_DIR/.venv/bin/python"
+  command -v python3 >/dev/null 2>&1 && add_candidate "$(command -v python3)"
+  command -v python >/dev/null 2>&1 && add_candidate "$(command -v python)"
+  for candidate in "${CANDIDATES[@]}"; do
+    if "$candidate" - <<'PY' >/dev/null 2>&1; then
+import sys
+assert sys.version_info >= (3, 11)
+PY
+      PYTHON_FOR_COMPILE="$candidate"
+      break
+    fi
+  done
+  if [[ -z "$PYTHON_FOR_COMPILE" ]]; then
+    echo "[self-test] No Python 3.11+ interpreter found for syntax checks." >&2
     exit 1
   fi
 fi
@@ -20,6 +74,7 @@ fi
 PYTHON_FOR_QT="${DESKTOP_MENTOR_PYTHON:-}"
 if [[ -z "$PYTHON_FOR_QT" ]]; then
   CANDIDATES=()
+  add_conda_python_candidates
   if [[ "${DESKTOP_MENTOR_PREFER_SYSTEM_QT:-1}" != "0" ]] && command -v fcitx5 >/dev/null 2>&1; then
     [[ -x /usr/bin/python3 ]] && CANDIDATES+=("/usr/bin/python3")
     [[ -x /usr/local/bin/python3 ]] && CANDIDATES+=("/usr/local/bin/python3")
@@ -38,6 +93,7 @@ from PySide6.QtWebEngineWidgets import QWebEngineView
 import latex2mathml
 import markdown_it
 import pygments
+import qasync
 PY
       PYTHON_FOR_QT="$candidate"
       break
@@ -47,7 +103,7 @@ fi
 
 if [[ -z "$PYTHON_FOR_QT" ]]; then
   echo "[self-test] No Python interpreter with the required Qt/Markdown rendering dependencies was found." >&2
-  echo "[self-test] Set DESKTOP_MENTOR_PYTHON=/path/to/python or install requirements.txt." >&2
+  echo "[self-test] Run scripts/linux/setup_conda_env.sh, or set DESKTOP_MENTOR_PYTHON=/path/to/python." >&2
   exit 1
 fi
 
@@ -136,6 +192,7 @@ PYTHONPATH="$ROOT_DIR" "$PYTHON_FOR_COMPILE" -m unittest discover -s tests
 step "Linux launcher syntax"
 bash -n scripts/linux/run_desktop_mentor.sh
 bash -n scripts/linux/self_test.sh
+bash -n scripts/linux/setup_conda_env.sh
 
 step "Linux desktop file"
 if command -v desktop-file-validate >/dev/null 2>&1; then

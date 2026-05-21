@@ -147,6 +147,7 @@ from PySide6.QtWebEngineWidgets import QWebEngineView
 import latex2mathml
 import markdown_it
 import pygments
+import qasync
 PY
 }
 
@@ -157,11 +158,49 @@ add_candidate() {
   CANDIDATES+=("$candidate")
 }
 
-add_standard_python_candidates() {
-  add_candidate "$ROOT_DIR/.venv/bin/python"
+find_conda_exe() {
+  if [[ -n "${CONDA_EXE:-}" && -x "${CONDA_EXE:-}" ]]; then
+    printf '%s\n' "$CONDA_EXE"
+    return 0
+  fi
+  if command -v conda >/dev/null 2>&1; then
+    command -v conda
+    return 0
+  fi
+  for candidate in "$HOME"/soft/conda/*/bin/conda "$HOME"/miniconda*/bin/conda "$HOME"/anaconda*/bin/conda; do
+    if [[ -x "$candidate" ]]; then
+      printf '%s\n' "$candidate"
+      return 0
+    fi
+  done
+  return 1
+}
+
+add_conda_python_candidates() {
+  local env_name env_prefix conda_exe conda_base env_root
+  env_name="${DESKTOP_MENTOR_CONDA_ENV_NAME:-my-desktop-mentor}"
+  env_prefix="${DESKTOP_MENTOR_CONDA_PREFIX:-$ROOT_DIR/.conda}"
+
+  add_candidate "$env_prefix/bin/python"
   if [[ -n "${CONDA_PREFIX:-}" ]]; then
     add_candidate "$CONDA_PREFIX/bin/python"
   fi
+
+  conda_exe="$(find_conda_exe || true)"
+  if [[ -n "$conda_exe" ]]; then
+    conda_base="$("$conda_exe" info --base 2>/dev/null || true)"
+    if [[ -n "$conda_base" ]]; then
+      add_candidate "$conda_base/envs/$env_name/bin/python"
+    fi
+  fi
+
+  for env_root in "$HOME"/soft/conda/*/envs "$HOME"/miniconda*/envs "$HOME"/anaconda*/envs; do
+    add_candidate "$env_root/$env_name/bin/python"
+  done
+}
+
+add_standard_python_candidates() {
+  add_candidate "$ROOT_DIR/.venv/bin/python"
   if command -v python3 >/dev/null 2>&1; then
     add_candidate "$(command -v python3)"
   fi
@@ -194,16 +233,15 @@ if [[ -n "${DESKTOP_MENTOR_PYTHON:-}" ]]; then
   if python_can_run_app "$DESKTOP_MENTOR_PYTHON"; then
     PYTHON_BIN="$DESKTOP_MENTOR_PYTHON"
   else
-    die "DESKTOP_MENTOR_PYTHON cannot import PySide6.QtCore: $DESKTOP_MENTOR_PYTHON"
+    die "DESKTOP_MENTOR_PYTHON cannot import the required Qt/Markdown dependencies: $DESKTOP_MENTOR_PYTHON"
   fi
 else
   CANDIDATES=()
+  add_conda_python_candidates
   if prefer_system_qt_python; then
     add_system_qt_python_candidates
-    add_standard_python_candidates
-  else
-    add_standard_python_candidates
   fi
+  add_standard_python_candidates
 
   for candidate in "${CANDIDATES[@]}"; do
     if python_can_run_app "$candidate"; then
@@ -219,7 +257,8 @@ if [[ -z "${PYTHON_BIN:-}" ]]; then
   for candidate in "${ATTEMPTED[@]}"; do
     printf '  - %s\n' "$candidate" >&2
   done
-  printf '[desktop-mentor] Set DESKTOP_MENTOR_PYTHON=/path/to/python or install requirements.txt.\n' >&2
+  printf '[desktop-mentor] Create the project Conda env with: scripts/linux/setup_conda_env.sh\n' >&2
+  printf '[desktop-mentor] Or set DESKTOP_MENTOR_PYTHON=/path/to/python / DESKTOP_MENTOR_CONDA_ENV_NAME=<env>.\n' >&2
   exit 1
 fi
 
@@ -260,7 +299,7 @@ except Exception as exc:
 print(f"[desktop-mentor] python version: {sys.version.split()[0]}", file=sys.stderr)
 print(f"[desktop-mentor] PySide6 path: {pyside_path}", file=sys.stderr)
 print(f"[desktop-mentor] Qt version: {qt_version}", file=sys.stderr)
-for module_name in ("PySide6.QtWebEngineWidgets", "markdown_it", "latex2mathml", "pygments"):
+for module_name in ("PySide6.QtWebEngineWidgets", "markdown_it", "latex2mathml", "pygments", "qasync"):
     try:
         module = __import__(module_name, fromlist=["*"])
         print(f"[desktop-mentor] {module_name}: {getattr(module, '__file__', 'built-in')}", file=sys.stderr)

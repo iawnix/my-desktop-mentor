@@ -16,14 +16,37 @@ PySide6 桌面导师 / 桌宠应用。它以透明置顶贴纸停留在桌面上
 
 要求：
 
-- Python 3.11+
+- Conda / Miniconda / Anaconda
+- Python 3.11+（推荐由 Conda 环境提供）
 - PySide6 6.5+
 
-安装依赖：
+推荐创建项目本地 Conda 环境。默认环境路径为项目目录下的 `.conda/`，这样 rofi、`.desktop`、Windows 快捷方式启动时不依赖终端里已经 `conda activate`。
 
 ```bash
-python3 -m pip install -r requirements.txt
+./scripts/linux/setup_conda_env.sh
 ```
+
+Windows:
+
+```bat
+scripts\windows\setup_conda_env.bat
+```
+
+也可以手动创建命名环境：
+
+```bash
+conda create -n my-desktop-mentor python=3.12 pip
+conda run -n my-desktop-mentor python -m pip install -r requirements.txt
+```
+
+启动脚本会按顺序查找：
+
+- `DESKTOP_MENTOR_PYTHON` 指定的解释器
+- `DESKTOP_MENTOR_CONDA_PREFIX` 指定的环境
+- 项目本地 `.conda/`
+- 当前已激活的 `CONDA_PREFIX`
+- `DESKTOP_MENTOR_CONDA_ENV_NAME` 指定的命名环境（默认 `my-desktop-mentor`）
+- `.venv/` 和系统 Python 作为兜底
 
 ## Linux 使用
 
@@ -40,6 +63,18 @@ cd my-desktop-mentor
 DESKTOP_MENTOR_PYTHON=/usr/bin/python3 ./scripts/linux/run_desktop_mentor.sh
 ```
 
+指定命名 Conda 环境：
+
+```bash
+DESKTOP_MENTOR_CONDA_ENV_NAME=my-desktop-mentor ./scripts/linux/run_desktop_mentor.sh
+```
+
+指定 Conda 环境路径：
+
+```bash
+DESKTOP_MENTOR_CONDA_PREFIX="$PWD/.conda" ./scripts/linux/run_desktop_mentor.sh
+```
+
 诊断和自测：
 
 ```bash
@@ -50,7 +85,7 @@ DESKTOP_MENTOR_PYTHON=/usr/bin/python3 ./scripts/linux/run_desktop_mentor.sh
 如果桌面启动器里 fcitx 中文输入无效，可以在 `.desktop` 的 `Exec` 前加：
 
 ```ini
-Exec=env QT_IM_MODULE=fcitx XMODIFIERS=@im=fcitx GTK_IM_MODULE=fcitx SDL_IM_MODULE=fcitx DESKTOP_MENTOR_IM_MODULE=fcitx /opt/my-desktop-mentor/scripts/linux/run_desktop_mentor.sh
+Exec=env QT_IM_MODULE=fcitx XMODIFIERS=@im=fcitx GTK_IM_MODULE=fcitx SDL_IM_MODULE=fcitx DESKTOP_MENTOR_IM_MODULE=fcitx DESKTOP_MENTOR_CONDA_ENV_NAME=my-desktop-mentor /opt/my-desktop-mentor/scripts/linux/run_desktop_mentor.sh
 ```
 
 Linux 桌面启动模板：
@@ -61,7 +96,20 @@ packaging/linux/desktop_mentor.desktop
 
 复制到 `~/.local/share/applications/` 前，按实际路径修改 `Exec` 和 `Icon`。
 
+如果使用 rofi 启动，先确认桌面文件可见：
+
+```bash
+desktop-file-validate ~/.local/share/applications/desktop_mentor.desktop
+gtk-launch desktop_mentor
+```
+
 ## Windows 使用
+
+首次安装依赖：
+
+```bat
+scripts\windows\setup_conda_env.bat
+```
 
 源码运行：
 
@@ -73,6 +121,13 @@ scripts\windows\run_desktop_mentor.bat
 
 ```bat
 scripts\windows\run_desktop_mentor_quiet.vbs
+```
+
+Windows 启动脚本同样优先使用项目本地 `.conda\python.exe`。如需指定已有环境：
+
+```bat
+set DESKTOP_MENTOR_CONDA_PREFIX=C:\Users\you\miniconda3\envs\my-desktop-mentor
+scripts\windows\run_desktop_mentor.bat
 ```
 
 打包 exe：
