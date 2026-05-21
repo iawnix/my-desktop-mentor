@@ -8,7 +8,8 @@ PySide6 桌面导师 / 桌宠应用。它以透明置顶贴纸停留在桌面上
 - 动作动画：内置 `idle`、`tap`、`drag`、`thinking`、`speaking`、`alert`、`drop_file`、`error` 八类贴纸。
 - 对话管理：本地多会话、会话搜索、会话栏/工具栏折叠。
 - 交互状态：请求处理中可取消，长回复可在独立详情窗口查看。
-- 模型上下文：可逐次选择是否把当前会话摘要和最近消息发给 agent；关闭时会开启新的独立会话。
+- 模型上下文：可逐次选择是否把当前会话摘要、最近消息和用户长期记忆发给 agent；关闭时会开启新的独立会话。
+- 长期记忆：本地保存用户级偏好/约束，支持在对话窗口中查看、编辑、停用和删除。
 - 电脑控制：读取、列目录、搜索、打开、运行、创建/写入文件都走统一授权流程。
 - 桌面辅助：文件拖放上下文、待办提醒、配置化形象和话术。
 
@@ -203,6 +204,8 @@ python3 desktop_mentor.py --load-sticker-dir /path/to/stickers
 
 - 本地会话历史负责保存、搜索和切换多个会话。
 - 模型上下文只决定本次请求是否携带当前会话内容给 agent。
+- 用户长期记忆保存在本机 `user_memory.json`，设置中启用后会随模型上下文一起注入。
+- 对话窗口左侧的 `记忆` 可以手动新增、编辑、停用或删除长期记忆。
 - 模型回复使用 HTML Markdown 渲染，支持代码高亮、表格和 LaTeX 公式；用户输入按普通文本显示。
 - 输入框按 Enter 发送消息，Shift+Enter 插入换行。
 - 请求处理中可点 `取消` 停止等待；较长的导师回复会显示 `完整回复` 入口。
@@ -281,6 +284,7 @@ CONTROL_REQUEST: 读取 D:\DATA\Desktop\Nature_manuscript.txt
 - `config.json`
 - `conversations/`
 - `memory.jsonl`
+- `user_memory.json`
 - `todos.json`
 - `control/audit.jsonl`
 - `logs/app.log`

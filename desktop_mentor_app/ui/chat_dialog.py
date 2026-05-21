@@ -45,6 +45,7 @@ class ChatDialog(QDialog):
     session_selected = Signal(str)
     new_session_requested = Signal()
     history_clear_requested = Signal(str)
+    memory_manage_requested = Signal()
 
     def __init__(
         self,
@@ -63,10 +64,10 @@ class ChatDialog(QDialog):
         self.context_removed = False
         self.context_check: QCheckBox | None = None
         self.context_chip: QFrame | None = None
-        self.conversation_context_check = QCheckBox("使用当前会话上下文")
+        self.conversation_context_check = QCheckBox("使用模型上下文")
         self.conversation_context_check.setChecked(use_conversation_context)
         self.conversation_context_check.setToolTip(
-            "只影响发送给模型的上下文，不影响本地会话历史。关闭后本次输入会进入新的独立会话。"
+            "只影响发送给模型的上下文，不影响本地会话历史。开启时会按设置携带会话上下文和长期记忆。"
         )
         self.waiting_for_reply = False
         self.session_rail_visible = False
@@ -96,6 +97,11 @@ class ChatDialog(QDialog):
         clear_button = QPushButton("清空当前")
         mark_button(clear_button, "quietButton")
         clear_button.clicked.connect(self.request_clear_history)
+
+        memory_button = QPushButton("记忆")
+        mark_button(memory_button, "secondaryButton")
+        memory_button.setToolTip("查看、编辑或删除用户长期记忆。")
+        memory_button.clicked.connect(self.memory_manage_requested.emit)
 
         self.history_content = make_transparent(QWidget())
         self.history_layout = QVBoxLayout(self.history_content)
@@ -156,7 +162,7 @@ class ChatDialog(QDialog):
         body.setContentsMargins(0, 0, 0, 0)
         body.setSpacing(0)
 
-        self.session_rail = self._build_session_rail(new_button, clear_button)
+        self.session_rail = self._build_session_rail(new_button, clear_button, memory_button)
         body.addWidget(self.session_rail, 0)
         body.addWidget(self._build_conversation_center(context_hint, send_button), 1)
         self.tool_rail = self._build_tool_rail()
@@ -183,7 +189,7 @@ class ChatDialog(QDialog):
         self.set_sessions(sessions or [], self.active_session_id)
         self.set_active_session(active_session, history or [])
 
-    def _build_session_rail(self, new_button: QPushButton, clear_button: QPushButton) -> QFrame:
+    def _build_session_rail(self, new_button: QPushButton, clear_button: QPushButton, memory_button: QPushButton) -> QFrame:
         rail = QFrame()
         rail.setObjectName("chatSessionRail")
         rail_layout = QVBoxLayout(rail)
@@ -204,6 +210,7 @@ class ChatDialog(QDialog):
         rail_buttons.addWidget(new_button)
         rail_buttons.addWidget(clear_button)
         rail_layout.addLayout(rail_buttons)
+        rail_layout.addWidget(memory_button)
         rail.setMaximumWidth(232)
         rail.setVisible(self.session_rail_visible)
         return rail

@@ -146,6 +146,7 @@ step "Python syntax"
   desktop_mentor_app/state/conversations.py \
   desktop_mentor_app/state/memory.py \
   desktop_mentor_app/state/todos.py \
+  desktop_mentor_app/state/user_memory.py \
   desktop_mentor_app/security/__init__.py \
   desktop_mentor_app/security/audit.py \
   desktop_mentor_app/security/policy.py \
@@ -174,6 +175,7 @@ step "Python syntax"
   desktop_mentor_app/ui/dialog_chrome.py \
   desktop_mentor_app/ui/dialogs.py \
   desktop_mentor_app/ui/idle_alert.py \
+  desktop_mentor_app/ui/memory_dialog.py \
   desktop_mentor_app/ui/pet_dialog_coordinator.py \
   desktop_mentor_app/ui/pet_interaction_controller.py \
   desktop_mentor_app/ui/pet_painter.py \
@@ -187,7 +189,7 @@ step "Python syntax"
   packaging/windows/desktop_mentor.spec
 
 step "Unit tests"
-PYTHONPATH="$ROOT_DIR" "$PYTHON_FOR_COMPILE" -m unittest discover -s tests
+PYTHONPATH="$ROOT_DIR" "$PYTHON_FOR_QT" -m unittest discover -s tests
 
 step "Linux launcher syntax"
 bash -n scripts/linux/run_desktop_mentor.sh
@@ -218,6 +220,8 @@ data = json.loads(os.environ["SELF_TEST_OUTPUT"])
 assert data["quit_on_last_window_closed"] is False
 assert data["config_schema_version"] == 2
 assert data["app_log_path"].endswith("/logs/app.log")
+assert data["user_memory_path"].endswith("/user_memory.json")
+assert data["long_term_memory_items"] > 0
 PY
 
 step "Qt dialog smoke"
@@ -243,6 +247,7 @@ from desktop_mentor_app.model_client.agent import agent_system_prompt, call_agen
 from desktop_mentor_app.core.assets import DEFAULT_IMAGE, DEFAULT_STICKERS_DIR, ROOT
 from desktop_mentor_app.config.store import AgentConfig, new_default_config
 from desktop_mentor_app.state.conversations import append_chat_turn, build_conversation_memory_context, clear_chat_history, create_conversation_session, load_chat_history, list_conversation_sessions
+from desktop_mentor_app.state.user_memory import add_user_memory, build_user_memory_context, delete_user_memory, load_user_memories
 from desktop_mentor_app.tools.executor import execute_control_plan
 from desktop_mentor_app.tools.registry import build_control_plan, build_control_plan_from_agent_reply, desktop_path
 from desktop_mentor_app.tools.types import PermissionLevel
@@ -253,7 +258,7 @@ from desktop_mentor_app.tools.drop_context import DROP_CONTEXT_PROMPT_HEADER, co
 from desktop_mentor_app.platforms.input_method import configure_linux_input_method_environment, fcitx_qt_plugin_files, input_method_diagnostics, preferred_x11_display
 from desktop_mentor_app.pet.stickers import discover_sticker_sets
 from desktop_mentor_app.state.todos import load_todos, save_todos
-from desktop_mentor_app.ui.dialogs import ChatDialog, SettingsDialog, TodoDialog, prepare_modern_menu
+from desktop_mentor_app.ui.dialogs import ChatDialog, SettingsDialog, TodoDialog, UserMemoryDialog, prepare_modern_menu
 from desktop_mentor_app.ui.markdown_rendering import normalize_model_markdown, render_markdown_fragment
 from desktop_mentor_app.ui.pet_widget import DesktopMentorPet
 from desktop_mentor_app.config.migration import CURRENT_CONFIG_SCHEMA_VERSION
@@ -265,11 +270,19 @@ from desktop_mentor_app.platforms.whatsapp import WhatsAppPlatform
 app = QApplication([])
 configure_linux_input_method_environment()
 settings = SettingsDialog(AgentConfig())
+memory_dialog = UserMemoryDialog()
 default_config = new_default_config()
 assert default_config.schema_version == CURRENT_CONFIG_SCHEMA_VERSION
 assert default_config.sticker_animation_speed == DEFAULT_STICKER_ANIMATION_SPEED, default_config.sticker_animation_speed
 assert PetTodoService().repeat_seconds("bad") == DEFAULT_TODO_REPEAT_SECONDS
 assert settings.sticker_animation_speed_spin.value() == DEFAULT_STICKER_ANIMATION_SPEED, settings.sticker_animation_speed_spin.value()
+assert settings.long_term_memory_items_spin.value() > 0
+memory = add_user_memory("默认先给结论。", source="self-test")
+assert memory is not None
+assert "默认先给结论" in build_user_memory_context("", 4)
+assert load_user_memories()
+assert delete_user_memory(memory.memory_id)
+assert "默认先给结论" not in build_user_memory_context("", 4)
 assert all(len(paths) == 16 for paths in default_config.sticker_sets.values()), default_config.sticker_sets
 assert len(default_config.sticker_sets) == 8, default_config.sticker_sets
 chat = ChatDialog()

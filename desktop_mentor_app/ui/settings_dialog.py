@@ -26,7 +26,12 @@ from ..config.store import AgentConfig, config_path
 from ..core.assets import DEFAULT_IMAGE
 from ..constants.app import APP_NAME
 from ..constants.control import DEFAULT_CONTROL_ENABLED, DEFAULT_CONTROL_WORKSPACE
-from ..constants.memory import DEFAULT_MEMORY_TURNS, MAX_MEMORY_TURNS
+from ..constants.memory import (
+    DEFAULT_LONG_TERM_MEMORY_ITEMS,
+    DEFAULT_MEMORY_TURNS,
+    MAX_LONG_TERM_MEMORY_ITEMS,
+    MAX_MEMORY_TURNS,
+)
 from ..constants.model import DEFAULT_MODEL, DEFAULT_PERSONALITY_PROMPT
 from ..constants.pet import (
     DEFAULT_CLICK_MESSAGE,
@@ -163,6 +168,16 @@ class SettingsDialog(QDialog):
         self.memory_turns_spin.setValue(max(1, min(MAX_MEMORY_TURNS, int(config.memory_turns or DEFAULT_MEMORY_TURNS))))
         self.memory_turns_spin.setSuffix(" turns")
 
+        self.long_term_memory_check = QCheckBox("启用用户长期记忆")
+        self.long_term_memory_check.setChecked(bool(config.long_term_memory_enabled))
+
+        self.long_term_memory_items_spin = QSpinBox()
+        self.long_term_memory_items_spin.setRange(1, MAX_LONG_TERM_MEMORY_ITEMS)
+        self.long_term_memory_items_spin.setValue(
+            max(1, min(MAX_LONG_TERM_MEMORY_ITEMS, int(config.long_term_memory_items or DEFAULT_LONG_TERM_MEMORY_ITEMS)))
+        )
+        self.long_term_memory_items_spin.setSuffix(" items")
+
         self.control_check = QCheckBox("允许受控电脑操作")
         self.control_check.setChecked(bool(config.control_enabled if config.control_enabled is not None else DEFAULT_CONTROL_ENABLED))
 
@@ -201,8 +216,10 @@ class SettingsDialog(QDialog):
         interaction_form.addRow("Idle mode", self.idle_mode_combo)
 
         memory_form = modern_form_layout()
-        memory_form.addRow("模型上下文", self.memory_check)
+        memory_form.addRow("会话上下文", self.memory_check)
         memory_form.addRow("上下文轮数", self.memory_turns_spin)
+        memory_form.addRow("长期记忆", self.long_term_memory_check)
+        memory_form.addRow("注入条数", self.long_term_memory_items_spin)
 
         control_form = modern_form_layout()
         control_form.addRow("Computer control", self.control_check)
@@ -394,6 +411,8 @@ class SettingsDialog(QDialog):
             idle_mode=str(self.idle_mode_combo.currentData() or DEFAULT_IDLE_MODE),
             memory_enabled=self.memory_check.isChecked(),
             memory_turns=int(self.memory_turns_spin.value()),
+            long_term_memory_enabled=self.long_term_memory_check.isChecked(),
+            long_term_memory_items=int(self.long_term_memory_items_spin.value()),
             control_enabled=self.control_check.isChecked(),
             control_workspace=self.control_workspace_edit.text().strip(),
             sticker_animation_speed=float(self.sticker_animation_speed_spin.value()),

@@ -21,6 +21,7 @@ from .store import (
     save_config_directory,
     sticker_sets_have_existing_frames,
     todos_path,
+    user_memory_path,
 )
 
 __all__ = [
@@ -44,4 +45,5 @@ __all__ = [
     "save_config_directory",
     "sticker_sets_have_existing_frames",
     "todos_path",
+    "user_memory_path",
 ]

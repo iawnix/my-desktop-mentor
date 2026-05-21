@@ -32,6 +32,7 @@ from .dialog_chrome import (
     transparent_scroll_area,
 )
 from .idle_alert import FullScreenIdleAlert
+from .memory_dialog import UserMemoryDialog
 from .settings_dialog import SettingsDialog
 from .sticker_set_editor import StickerSetEditor
 from .text_view_dialog import TextViewDialog
@@ -48,6 +49,7 @@ __all__ = [
     "TextMarkdownMessageView",
     "TextViewDialog",
     "TodoDialog",
+    "UserMemoryDialog",
     "activate_input_window",
     "add_resize_grip",
     "create_markdown_message_view",

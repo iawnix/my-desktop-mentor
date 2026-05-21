@@ -11,7 +11,14 @@ from pathlib import Path
 from ..core.assets import DEFAULT_STICKERS_DIR
 from ..constants.app import APP_ID, CONFIG_POINTER_NAME
 from ..constants.control import DEFAULT_CONTROL_ENABLED, DEFAULT_CONTROL_WORKSPACE
-from ..constants.memory import DEFAULT_MEMORY_ENABLED, DEFAULT_MEMORY_TURNS, MAX_MEMORY_TURNS
+from ..constants.memory import (
+    DEFAULT_LONG_TERM_MEMORY_ENABLED,
+    DEFAULT_LONG_TERM_MEMORY_ITEMS,
+    DEFAULT_MEMORY_ENABLED,
+    DEFAULT_MEMORY_TURNS,
+    MAX_LONG_TERM_MEMORY_ITEMS,
+    MAX_MEMORY_TURNS,
+)
 from ..constants.model import DEFAULT_MODEL, DEFAULT_PERSONALITY_PROMPT
 from ..constants.pet import (
     DEFAULT_CLICK_MESSAGE,
@@ -56,6 +63,8 @@ class AgentConfig:
     idle_mode: str = DEFAULT_IDLE_MODE
     memory_enabled: bool = DEFAULT_MEMORY_ENABLED
     memory_turns: int = DEFAULT_MEMORY_TURNS
+    long_term_memory_enabled: bool = DEFAULT_LONG_TERM_MEMORY_ENABLED
+    long_term_memory_items: int = DEFAULT_LONG_TERM_MEMORY_ITEMS
     control_enabled: bool = DEFAULT_CONTROL_ENABLED
     control_workspace: str = DEFAULT_CONTROL_WORKSPACE
     sticker_animation_speed: float = DEFAULT_STICKER_ANIMATION_SPEED
@@ -189,6 +198,10 @@ def memory_path() -> Path:
     return config_path().parent / "memory.jsonl"
 
 
+def user_memory_path() -> Path:
+    return config_path().parent / "user_memory.json"
+
+
 def chat_history_path() -> Path:
     return config_path().parent / "chat_history.jsonl"
 
@@ -257,6 +270,10 @@ def load_config(path: Path | None = None) -> AgentConfig:
         config.memory_enabled = config.memory_enabled.strip().lower() in {"1", "true", "yes", "on"}
     else:
         config.memory_enabled = bool(config.memory_enabled)
+    if isinstance(config.long_term_memory_enabled, str):
+        config.long_term_memory_enabled = config.long_term_memory_enabled.strip().lower() in {"1", "true", "yes", "on"}
+    else:
+        config.long_term_memory_enabled = bool(config.long_term_memory_enabled)
     if isinstance(config.control_enabled, str):
         config.control_enabled = config.control_enabled.strip().lower() in {"1", "true", "yes", "on"}
     else:
@@ -266,6 +283,10 @@ def load_config(path: Path | None = None) -> AgentConfig:
         config.memory_turns = max(1, min(MAX_MEMORY_TURNS, int(config.memory_turns)))
     except Exception:
         config.memory_turns = DEFAULT_MEMORY_TURNS
+    try:
+        config.long_term_memory_items = max(1, min(MAX_LONG_TERM_MEMORY_ITEMS, int(config.long_term_memory_items)))
+    except Exception:
+        config.long_term_memory_items = DEFAULT_LONG_TERM_MEMORY_ITEMS
     valid_idle_modes = {value for value, _label in IDLE_MODE_OPTIONS}
     config.idle_mode = str(config.idle_mode or DEFAULT_IDLE_MODE)
     if config.idle_mode not in valid_idle_modes:

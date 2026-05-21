@@ -18,7 +18,7 @@ configure_linux_input_method_environment()
 
 from PySide6.QtWidgets import QApplication
 
-from desktop_mentor_app.config.store import chat_history_path, load_config, memory_path, save_config, todos_path
+from desktop_mentor_app.config.store import chat_history_path, load_config, memory_path, save_config, todos_path, user_memory_path
 from desktop_mentor_app.core.assets import DEFAULT_IMAGE, convert_image_to_ico, ensure_default_icon
 from desktop_mentor_app.security.audit import audit_log_path
 from desktop_mentor_app.core.runtime import run_qt_app
@@ -112,6 +112,8 @@ def main(argv: list[str]) -> int:
             "todo_repeat_seconds": pet.config.todo_repeat_seconds,
             "idle_mode": pet.config.idle_mode,
             "memory_enabled": pet.config.memory_enabled,
+            "long_term_memory_enabled": pet.config.long_term_memory_enabled,
+            "long_term_memory_items": pet.config.long_term_memory_items,
             "control_enabled": pet.config.control_enabled,
             "control_workspace": pet.config.control_workspace,
             "control_audit_path": str(audit_log_path()),
@@ -120,6 +122,7 @@ def main(argv: list[str]) -> int:
             "sticker_frame_counts": pet.sticker_frame_counts(),
             "current_action": pet.current_action,
             "memory_path": str(memory_path()),
+            "user_memory_path": str(user_memory_path()),
             "todos_path": str(todos_path()),
             "icon": pet.config.icon_path,
             "icon_error": pet.icon_error,

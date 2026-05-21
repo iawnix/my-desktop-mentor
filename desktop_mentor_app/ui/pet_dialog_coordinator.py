@@ -27,6 +27,7 @@ from ..state.todos import load_todos, save_todos
 from ..tools.registry import build_control_plan
 from ..tools.types import ControlPlan
 from .chat_dialog import ChatDialog
+from .memory_dialog import UserMemoryDialog
 from .settings_dialog import SettingsDialog
 from .text_view_dialog import TextViewDialog
 from .todo_dialog import TodoDialog
@@ -37,6 +38,10 @@ class PetDialogCoordinator:
         self.pet = pet
         self.active_agent_tasks: dict[str, asyncio.Task[None]] = {}
         self.active_agent_prompts: dict[str, str] = {}
+
+    def context_default_enabled(self) -> bool:
+        config = self.pet.config
+        return bool(getattr(config, "memory_enabled", False) or getattr(config, "long_term_memory_enabled", False))
 
     def open_settings(self) -> None:
         pet = self.pet
@@ -123,7 +128,7 @@ class PetDialogCoordinator:
             list_conversation_sessions(),
             active_session,
             load_chat_history(active_session.session_id),
-            use_conversation_context=bool(pet.config.memory_enabled),
+            use_conversation_context=self.context_default_enabled(),
         )
         dialog.message_submitted.connect(self.handle_chat_message)
         dialog.request_cancelled.connect(self.cancel_agent_request)
@@ -132,6 +137,7 @@ class PetDialogCoordinator:
         dialog.session_selected.connect(self.load_chat_session_in_dialog)
         dialog.new_session_requested.connect(self.create_chat_session_from_dialog)
         dialog.history_clear_requested.connect(self.clear_chat_history_from_dialog)
+        dialog.memory_manage_requested.connect(self.open_memory_manager)
         dialog.finished.connect(lambda _code=0, target=dialog: self.clear_chat_dialog(target))
         pet.chat_dialog = dialog
         self.position_dialog_near_pet(dialog)
@@ -173,6 +179,18 @@ class PetDialogCoordinator:
             pet.chat_dialog.set_sessions(list_conversation_sessions(), session.session_id)
             pet.chat_dialog.set_active_session(session, [])
         pet.show_bubble("会话历史已清空。", duration=pet.message_duration(), action=STICKER_ACTION_TAP)
+
+    def open_memory_manager(self) -> None:
+        pet = self.pet
+        pet.mark_interaction()
+        dialog = UserMemoryDialog(pet)
+        changed = {"value": False}
+        dialog.memories_changed.connect(lambda: changed.__setitem__("value", True))
+        self.position_dialog_near_pet(dialog)
+        dialog.activate_for_input()
+        dialog.exec()
+        if changed["value"]:
+            pet.show_bubble("长期记忆已更新。", duration=pet.message_duration(), action=STICKER_ACTION_TAP)
 
     def session_for_context_policy(
         self,
@@ -365,11 +383,11 @@ class PetDialogCoordinator:
         active_session = self.session_for_context_policy(
             user_prompt,
             ensure_active_session().session_id,
-            bool(pet.config.memory_enabled),
+            self.context_default_enabled(),
         )
         pet.show_bubble("导师正在看文件。", duration=min(1.8, pet.message_duration()), action=None)
         pet.play_action(STICKER_ACTION_THINKING, loop=True)
-        self.queue_agent_reply(prompt, "只问文件", active_session.session_id, bool(pet.config.memory_enabled))
+        self.queue_agent_reply(prompt, "只问文件", active_session.session_id, self.context_default_enabled())
 
     def open_drop_summary(self) -> None:
         pet = self.pet

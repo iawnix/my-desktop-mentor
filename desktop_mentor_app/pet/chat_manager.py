@@ -16,6 +16,7 @@ from ..state.conversations import (
     set_active_session,
 )
 from ..state.memory import append_memory_turn
+from ..state.user_memory import build_user_memory_context, record_user_memory_turn
 from ..tools.executor import execute_control_plan_async
 from ..tools.registry import build_control_plan_from_agent_reply
 from ..tools.types import ControlPlan
@@ -92,6 +93,8 @@ class PetConversationService:
                 )
 
         self._append_chat_turn(memory_prompt or prompt, reply, session.session_id)
+        if use_conversation_context and getattr(config, "long_term_memory_enabled", False):
+            self._record_user_memory(memory_prompt or prompt, reply, session.session_id)
         if use_conversation_context and config.memory_enabled:
             self._append_legacy_memory(memory_prompt or prompt, reply)
         return AgentReplyResult(reply, session.session_id)
@@ -136,14 +139,26 @@ class PetConversationService:
     ) -> str:
         if not use_conversation_context:
             return prompt
+        parts: list[str] = []
+        try:
+            user_memory_context = build_user_memory_context(
+                prompt,
+                getattr(config, "long_term_memory_items", getattr(config, "memory_turns", 8)),
+            ) if getattr(config, "long_term_memory_enabled", False) else ""
+            if user_memory_context:
+                parts.append(user_memory_context)
+        except Exception:
+            LOGGER.exception("failed to build user memory context")
         try:
             memory_context = build_conversation_memory_context(session_id, config.memory_turns)
+            if memory_context:
+                parts.append(memory_context)
         except Exception:
             LOGGER.exception("failed to build conversation memory context")
+        if not parts:
             return prompt
-        if not memory_context:
-            return prompt
-        return f"{memory_context}\n\n当前输入:\n{prompt}"
+        context_text = "\n\n".join(parts)
+        return f"{context_text}\n\n当前输入:\n{prompt}"
 
     def _extract_control_plan(self, reply: str, workspace: str) -> tuple[ControlPlan | None, str]:
         try:
@@ -163,3 +178,9 @@ class PetConversationService:
             append_memory_turn(prompt, reply)
         except Exception:
             LOGGER.exception("failed to append legacy memory turn")
+
+    def _record_user_memory(self, prompt: str, reply: str, session_id: str) -> None:
+        try:
+            record_user_memory_turn(prompt, reply, session_id=session_id)
+        except Exception:
+            LOGGER.exception("failed to record user memory")
