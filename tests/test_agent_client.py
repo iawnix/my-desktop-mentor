@@ -3,7 +3,6 @@ from __future__ import annotations
 import unittest
 from types import SimpleNamespace
 
-from desktop_mentor_app.agent_client import call_agent as compat_call_agent
 from desktop_mentor_app.model_client.agent import call_agent, call_agent_async, normalize_chat_url
 from desktop_mentor_app.constants import DEFAULT_MODEL, DEFAULT_PERSONALITY_PROMPT
 from desktop_mentor_app.model_client.base import ModelResponse
@@ -86,9 +85,6 @@ class AgentClientTests(unittest.IsolatedAsyncioTestCase):
             "http://localhost:8000/v1/chat/completions",
         )
         self.assertEqual(normalize_chat_url("http://localhost:8000"), "http://localhost:8000/v1/chat/completions")
-
-    def test_agent_client_compatibility_exports_model_client_function(self) -> None:
-        self.assertIs(compat_call_agent, call_agent)
 
     async def test_call_agent_async_accepts_injected_model_client(self) -> None:
         config = agent_config(api_url="http://model.test/v1", api_key="token", model="mentor-model")

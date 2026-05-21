@@ -53,7 +53,6 @@ step "Python syntax"
 "$PYTHON_FOR_COMPILE" -m py_compile \
   desktop_mentor.py \
   desktop_mentor_app/constants.py \
-  desktop_mentor_app/logging_config.py \
   desktop_mentor_app/config/__init__.py \
   desktop_mentor_app/config/migration.py \
   desktop_mentor_app/config/store.py \
@@ -99,21 +98,6 @@ step "Python syntax"
   desktop_mentor_app/pet/sticker_manager.py \
   desktop_mentor_app/pet/stickers.py \
   desktop_mentor_app/pet/todo_manager.py \
-  desktop_mentor_app/config_store.py \
-  desktop_mentor_app/input_method.py \
-  desktop_mentor_app/control/__init__.py \
-  desktop_mentor_app/control/audit_log.py \
-  desktop_mentor_app/control/executor.py \
-  desktop_mentor_app/control/permissions.py \
-  desktop_mentor_app/control/tool_registry.py \
-  desktop_mentor_app/control/types.py \
-  desktop_mentor_app/conversation_store.py \
-  desktop_mentor_app/assets.py \
-  desktop_mentor_app/stickers.py \
-  desktop_mentor_app/todo_store.py \
-  desktop_mentor_app/agent_client.py \
-  desktop_mentor_app/idle_detector.py \
-  desktop_mentor_app/drop_context.py \
   desktop_mentor_app/ui/tokens.py \
   desktop_mentor_app/ui/chat_components.py \
   desktop_mentor_app/ui/chat_dialog.py \
@@ -187,10 +171,10 @@ from desktop_mentor_app.config import store as config_store
 from desktop_mentor_app.model_client.agent import agent_system_prompt, call_agent_async, compact_text, limit_formatted_text
 from desktop_mentor_app.core.assets import DEFAULT_IMAGE, DEFAULT_STICKERS_DIR, ROOT
 from desktop_mentor_app.config.store import AgentConfig, new_default_config
-from desktop_mentor_app.control import PermissionLevel
 from desktop_mentor_app.state.conversations import append_chat_turn, build_conversation_memory_context, clear_chat_history, create_conversation_session, load_chat_history, list_conversation_sessions
 from desktop_mentor_app.tools.executor import execute_control_plan
 from desktop_mentor_app.tools.registry import build_control_plan, build_control_plan_from_agent_reply, desktop_path
+from desktop_mentor_app.tools.types import PermissionLevel
 from desktop_mentor_app.constants import DEFAULT_CLICK_MESSAGE, DEFAULT_STICKER_ANIMATION_SPEED, DEFAULT_TODO_REPEAT_SECONDS, MAX_IDLE_SECONDS, MAX_PET_SIZE, MAX_STICKER_ANIMATION_SPEED, MIN_PET_SIZE, STICKER_ACTION_IDLE, STICKER_ACTION_TAP
 from desktop_mentor_app.tools.drop_context import DROP_CONTEXT_PROMPT_HEADER, collect_drop_context, compose_prompt_with_drop_context
 from desktop_mentor_app.platforms.input_method import configure_linux_input_method_environment, fcitx_qt_plugin_files, input_method_diagnostics, preferred_x11_display
