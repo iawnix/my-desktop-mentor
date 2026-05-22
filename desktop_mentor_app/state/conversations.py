@@ -514,9 +514,13 @@ def clear_chat_history(session_id: str | None = None) -> ConversationSession:
 
 def delete_conversation_session(session_id: str) -> ConversationSession:
     clean_id = safe_session_id(session_id)
+    if not clean_id:
+        return ensure_active_session()
     sessions = [session for session in read_session_index() if session.session_id != clean_id]
     try:
         session_messages_path(clean_id).unlink()
+    except FileNotFoundError:
+        pass
     except OSError as exc:
         LOGGER.warning("failed to remove conversation file for %s: %s", clean_id, exc)
     write_session_index(sessions)

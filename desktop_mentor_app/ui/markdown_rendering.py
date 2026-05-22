@@ -277,6 +277,13 @@ body {{
   line-height: 1.46;
   overflow: hidden;
 }}
+img {{
+  border-radius: 7px;
+  display: block;
+  height: auto;
+  margin: 7px 0 9px 0;
+  max-width: 100%;
+}}
 p {{
   margin: 0 0 8px 0;
 }}
@@ -352,7 +359,10 @@ a:hover {{
 }}
 table {{
   border-collapse: collapse;
+  display: block;
   margin: 6px 0 9px 0;
+  max-width: 100%;
+  overflow-x: auto;
   width: 100%;
 }}
 th, td {{

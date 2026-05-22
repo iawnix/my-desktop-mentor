@@ -94,8 +94,9 @@ class ChatDialog(QDialog):
         mark_button(new_button, "primaryButton")
         new_button.clicked.connect(self.new_session_requested.emit)
 
-        clear_button = QPushButton("清空当前")
+        clear_button = QPushButton("删除当前")
         mark_button(clear_button, "quietButton")
+        clear_button.setToolTip("删除当前本地会话，并从会话列表移除。")
         clear_button.clicked.connect(self.request_clear_history)
 
         memory_button = QPushButton("记忆")
@@ -492,7 +493,7 @@ class ChatDialog(QDialog):
             row_layout.addWidget(card, 0)
         else:
             row_layout.addWidget(self.assistant_avatar(), 0, Qt.AlignmentFlag.AlignTop)
-            row_layout.addWidget(card, 1)
+            row_layout.addWidget(card, 1 if card.wants_wide_layout else 0)
             row_layout.addStretch(1)
         self.history_layout.addWidget(row)
         self.message_widgets.append(row)

@@ -2,9 +2,10 @@
 from __future__ import annotations
 
 import os
+import re
 
 from PySide6.QtCore import QTimer, Qt, QUrl, Signal
-from PySide6.QtGui import QColor, QKeyEvent
+from PySide6.QtGui import QColor, QFontMetrics, QKeyEvent
 from PySide6.QtWidgets import QFrame, QHBoxLayout, QPushButton, QSizePolicy, QTextBrowser, QTextEdit, QVBoxLayout, QWidget
 
 try:
@@ -17,6 +18,49 @@ from .markdown_rendering import markdown_css, render_markdown_document, render_m
 from .text_view_dialog import TextViewDialog
 
 FULL_REPLY_THRESHOLD = 1600
+ASSISTANT_MAX_WIDTH = 880
+USER_MAX_WIDTH = 700
+COMPACT_MESSAGE_MIN_WIDTH = 190
+COMPACT_MESSAGE_PADDING_WIDTH = 60
+WIDE_MESSAGE_TEXT_LIMIT = 220
+WIDE_MESSAGE_LINE_LIMIT = 88
+
+_FENCE_RE = re.compile(r"(^|\n)\s{0,3}(```|~~~)")
+_TABLE_SEPARATOR_RE = re.compile(r"(^|\n)\s*\|?.+\|.+\n\s*\|?\s*:?-{3,}:?\s*(\|\s*:?-{3,}:?\s*)+\|?\s*(\n|$)")
+_IMAGE_RE = re.compile(r"!\[[^\]]*]\([^)]+\)|<img\b", re.IGNORECASE)
+_BLOCK_MATH_RE = re.compile(r"(?<!\\)(\$\$|\\\[)")
+_INLINE_MATH_RE = re.compile(r"(?<!\\)(\$[^\s$].*?[^\s\\]\$|\\\()")
+
+
+def message_uses_rich_markdown(markdown: str) -> bool:
+    text = str(markdown or "")
+    return bool(
+        _FENCE_RE.search(text)
+        or _TABLE_SEPARATOR_RE.search(text)
+        or _IMAGE_RE.search(text)
+        or _BLOCK_MATH_RE.search(text)
+        or _INLINE_MATH_RE.search(text)
+    )
+
+
+def message_prefers_wide_layout(role: str, markdown: str) -> bool:
+    text = str(markdown or "").strip()
+    if role == "tool":
+        return True
+    if _FENCE_RE.search(text) or _TABLE_SEPARATOR_RE.search(text) or _IMAGE_RE.search(text) or _BLOCK_MATH_RE.search(text):
+        return True
+    if len(text) >= WIDE_MESSAGE_TEXT_LIMIT:
+        return True
+    return any(len(line) >= WIDE_MESSAGE_LINE_LIMIT for line in text.splitlines())
+
+
+def compact_width_basis(markdown: str) -> str:
+    text = str(markdown or "")
+    text = re.sub(r"!\[([^\]]*)]\([^)]+\)", r"\1", text)
+    text = re.sub(r"\[([^\]]+)]\([^)]+\)", r"\1", text)
+    text = re.sub(r"[*_`>#-]+", "", text)
+    lines = [" ".join(line.split()) for line in text.splitlines()]
+    return max((line for line in lines if line), key=len, default=text.strip())
 
 
 def webengine_markdown_enabled() -> bool:
@@ -56,7 +100,7 @@ class TextMarkdownMessageView(QTextBrowser):
             Qt.TextInteractionFlag.TextSelectableByMouse
             | Qt.TextInteractionFlag.LinksAccessibleByMouse
         )
-        self.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Minimum)
+        self.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Fixed)
         self.document().setDocumentMargin(0)
         self.document().setDefaultStyleSheet(markdown_css())
         self.setHtml(render_markdown_fragment(markdown))
@@ -83,7 +127,7 @@ if QWebEngineView is not None:
             super().__init__(parent)
             self.setObjectName("chatMarkdownMessage")
             self.setAttribute(Qt.WidgetAttribute.WA_TranslucentBackground, True)
-            self.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Minimum)
+            self.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Fixed)
             self.page().setBackgroundColor(QColor(0, 0, 0, 0))
             self.loadFinished.connect(self._on_load_finished)
             self.setHtml(render_markdown_document(markdown), QUrl("about:blank"))
@@ -95,15 +139,24 @@ if QWebEngineView is not None:
 
         def _on_load_finished(self, _ok: bool) -> None:
             self.sync_height_to_document()
+            for delay in (80, 240, 600):
+                QTimer.singleShot(delay, self.sync_height_to_document)
 
         def sync_height_to_document(self) -> None:
             script = """
 (() => {
-  const root = document.documentElement;
   const body = document.body;
-  const rootHeight = root ? root.scrollHeight : 0;
-  const bodyHeight = body ? body.scrollHeight : 0;
-  return Math.ceil(Math.max(rootHeight, bodyHeight, 24));
+  if (!body) return 24;
+  let bottom = 0;
+  for (const element of Array.from(body.children)) {
+    const rect = element.getBoundingClientRect();
+    const style = window.getComputedStyle(element);
+    const marginBottom = Number.parseFloat(style.marginBottom || "0") || 0;
+    if (rect.width || rect.height) {
+      bottom = Math.max(bottom, rect.bottom + marginBottom);
+    }
+  }
+  return Math.ceil(Math.max(bottom, 24));
 })()
 """
             try:
@@ -122,8 +175,8 @@ if QWebEngineView is not None:
                 return
 
 
-def create_markdown_message_view(markdown: str) -> QWidget:
-    if webengine_markdown_enabled() and QWebEngineView is not None:
+def create_markdown_message_view(markdown: str, *, rich: bool) -> QWidget:
+    if rich and webengine_markdown_enabled() and QWebEngineView is not None:
         return WebMarkdownMessageView(markdown)  # type: ignore[name-defined]
     return TextMarkdownMessageView(markdown)
 
@@ -133,9 +186,14 @@ class ChatMessageCard(QFrame):
         super().__init__(parent)
         self.role = role if role in {"assistant", "tool"} else "user"
         self.full_text = str(text or "")
+        self.wants_wide_layout = message_prefers_wide_layout(self.role, self.full_text)
+        self.uses_rich_markdown = message_uses_rich_markdown(self.full_text)
         self.setObjectName("chatMessageCardAssistant" if self.role != "user" else "chatMessageCardUser")
-        self.setMaximumWidth(880 if self.role != "user" else 700)
-        self.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Maximum)
+        self.setMaximumWidth(ASSISTANT_MAX_WIDTH if self.role != "user" else USER_MAX_WIDTH)
+        self.setSizePolicy(
+            QSizePolicy.Policy.Expanding if self.wants_wide_layout else QSizePolicy.Policy.Maximum,
+            QSizePolicy.Policy.Maximum,
+        )
         layout = QVBoxLayout(self)
         layout.setContentsMargins(14, 12, 14, 12)
         layout.setSpacing(7)
@@ -149,7 +207,9 @@ class ChatMessageCard(QFrame):
         layout.addLayout(header)
 
         if self.role != "user":
-            layout.addWidget(create_markdown_message_view(self.full_text), 1)
+            if not self.wants_wide_layout:
+                self.setMaximumWidth(self.compact_message_width())
+            layout.addWidget(create_markdown_message_view(self.full_text, rich=self.uses_rich_markdown), 0)
             if self.has_full_reply_detail():
                 detail_button = QPushButton("完整工具输出" if self.role == "tool" else "完整回复")
                 mark_button(detail_button, "quietButton")
@@ -165,6 +225,12 @@ class ChatMessageCard(QFrame):
             message_label.setTextFormat(Qt.TextFormat.PlainText)
             message_label.setTextInteractionFlags(Qt.TextInteractionFlag.TextSelectableByMouse)
             layout.addWidget(message_label)
+
+    def compact_message_width(self) -> int:
+        metrics = QFontMetrics(self.font())
+        basis = compact_width_basis(self.full_text)
+        text_width = metrics.horizontalAdvance(basis)
+        return max(COMPACT_MESSAGE_MIN_WIDTH, min(ASSISTANT_MAX_WIDTH, text_width + COMPACT_MESSAGE_PADDING_WIDTH))
 
     def has_full_reply_detail(self) -> bool:
         return len(self.full_text) >= FULL_REPLY_THRESHOLD or self.full_text.count("\n") >= 18

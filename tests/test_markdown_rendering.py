@@ -3,6 +3,7 @@ from __future__ import annotations
 import builtins
 import unittest
 
+from desktop_mentor_app.ui.chat_components import message_prefers_wide_layout, message_uses_rich_markdown
 from desktop_mentor_app.ui.markdown_rendering import render_markdown_fragment
 
 
@@ -41,6 +42,22 @@ class MarkdownRenderingTests(unittest.TestCase):
 
         self.assertIn("<table>", rendered)
         self.assertNotIn("|---|", rendered)
+
+    def test_message_layout_distinguishes_short_text_from_rich_blocks(self) -> None:
+        self.assertFalse(message_prefers_wide_layout("assistant", "好的，已经处理。"))
+        self.assertFalse(message_uses_rich_markdown("好的，已经处理。"))
+
+        rich_cases = [
+            "```python\nprint('ok')\n```",
+            "| A | B |\n|---|---|\n| 1 | 2 |",
+            r"\[\int_0^1 x^2 dx\]",
+            "![plot](result.png)",
+        ]
+        for text in rich_cases:
+            self.assertTrue(message_prefers_wide_layout("assistant", text))
+            self.assertTrue(message_uses_rich_markdown(text))
+
+        self.assertTrue(message_prefers_wide_layout("tool", "ok"))
 
 
 if __name__ == "__main__":

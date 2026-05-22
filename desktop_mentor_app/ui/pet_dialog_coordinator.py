@@ -6,7 +6,7 @@ import time
 from pathlib import Path
 from typing import Any
 
-from PySide6.QtCore import QPoint, QRect
+from PySide6.QtCore import QPoint, QRect, QTimer, Qt
 from PySide6.QtGui import QGuiApplication
 from PySide6.QtWidgets import QDialog
 
@@ -15,8 +15,8 @@ from ..constants.pet import IDLE_MODE_FULLSCREEN
 from ..constants.stickers import STICKER_ACTION_ERROR, STICKER_ACTION_TAP, STICKER_ACTION_THINKING
 from ..tools.drop_context import compose_prompt_with_drop_context
 from ..state.conversations import (
-    clear_chat_history,
     create_conversation_session,
+    delete_conversation_session,
     ensure_active_session,
     get_session,
     list_conversation_sessions,
@@ -38,6 +38,7 @@ class PetDialogCoordinator:
         self.pet = pet
         self.active_agent_tasks: dict[str, asyncio.Task[None]] = {}
         self.active_agent_prompts: dict[str, str] = {}
+        self.memory_dialog: UserMemoryDialog | None = None
 
     def context_default_enabled(self) -> bool:
         config = self.pet.config
@@ -174,23 +175,57 @@ class PetDialogCoordinator:
 
     def clear_chat_history_from_dialog(self, session_id: str) -> None:
         pet = self.pet
-        session = clear_chat_history(session_id)
+        target_id = session_id or (pet.chat_dialog.active_session_id if pet.chat_dialog is not None else "")
+        self.cancel_session_activity(target_id)
+        session = delete_conversation_session(target_id)
         if pet.chat_dialog is not None:
             pet.chat_dialog.set_sessions(list_conversation_sessions(), session.session_id)
-            pet.chat_dialog.set_active_session(session, [])
-        pet.show_bubble("会话历史已清空。", duration=pet.message_duration(), action=STICKER_ACTION_TAP)
+            pet.chat_dialog.set_active_session(session, load_chat_history(session.session_id))
+        pet.show_bubble("当前会话已删除。", duration=pet.message_duration(), action=STICKER_ACTION_TAP)
+
+    def cancel_session_activity(self, session_id: str) -> None:
+        if not session_id:
+            return
+        task = self.active_agent_tasks.pop(session_id, None)
+        self.active_agent_prompts.pop(session_id, None)
+        if task is not None and not task.done():
+            task.cancel()
+        for plan_id, pending in list(self.pet.pending_control_plans.items()):
+            if len(pending) >= 3 and pending[2] == session_id:
+                self.pet.pending_control_plans.pop(plan_id, None)
+                self.pet.chat_service.discard_pending_agent_state(plan_id)
 
     def open_memory_manager(self) -> None:
         pet = self.pet
         pet.mark_interaction()
-        dialog = UserMemoryDialog(pet)
+        if self.memory_dialog is not None and self.memory_dialog.isVisible():
+            self.memory_dialog.raise_()
+            self.memory_dialog.activate_for_input()
+            return
+
+        parent = pet.chat_dialog if pet.chat_dialog is not None and pet.chat_dialog.isVisible() else pet
+        dialog = UserMemoryDialog(parent)
+        dialog.setModal(False)
+        dialog.setWindowModality(Qt.WindowModality.NonModal)
+        self.memory_dialog = dialog
         changed = {"value": False}
         dialog.memories_changed.connect(lambda: changed.__setitem__("value", True))
-        self.position_dialog_near_pet(dialog)
+        dialog.finished.connect(lambda _code=0, target=dialog: self.clear_memory_dialog(target, changed["value"]))
+        if isinstance(parent, QDialog):
+            self.position_dialog_near_dialog(dialog, parent)
+        else:
+            self.position_dialog_near_pet(dialog)
+        dialog.show()
+        dialog.raise_()
         dialog.activate_for_input()
-        dialog.exec()
-        if changed["value"]:
-            pet.show_bubble("长期记忆已更新。", duration=pet.message_duration(), action=STICKER_ACTION_TAP)
+        QTimer.singleShot(0, dialog.activate_for_input)
+
+    def clear_memory_dialog(self, dialog: UserMemoryDialog, changed: bool) -> None:
+        if self.memory_dialog is dialog:
+            self.memory_dialog = None
+        dialog.deleteLater()
+        if changed:
+            self.pet.show_bubble("长期记忆已更新。", duration=self.pet.message_duration(), action=STICKER_ACTION_TAP)
 
     def session_for_context_policy(
         self,
@@ -490,6 +525,19 @@ class PetDialogCoordinator:
         x = min(max(candidates[0].x(), area.left() + margin), area.right() - size.width() - margin)
         y = min(max(candidates[0].y(), area.top() + margin), area.bottom() - size.height() - margin)
         dialog.move(x, y)
+
+    def position_dialog_near_dialog(self, dialog: QDialog, anchor: QDialog) -> None:
+        dialog.adjustSize()
+        size = dialog.size()
+        anchor_rect = anchor.frameGeometry()
+        screen = QGuiApplication.screenAt(anchor_rect.center()) or QGuiApplication.primaryScreen()
+        area = screen.availableGeometry() if screen else QRect(0, 0, 1280, 720)
+        margin = 14
+        max_x = max(area.left() + margin, area.right() - size.width() - margin)
+        max_y = max(area.top() + margin, area.bottom() - size.height() - margin)
+        x = min(max(anchor_rect.center().x() - size.width() // 2, area.left() + margin), max_x)
+        y = min(max(anchor_rect.center().y() - size.height() // 2, area.top() + margin), max_y)
+        dialog.move(QPoint(x, y))
 
     def show_agent_control_request(
         self,
