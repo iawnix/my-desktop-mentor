@@ -202,6 +202,10 @@ def user_memory_path() -> Path:
     return config_path().parent / "user_memory.json"
 
 
+def agent_store_path() -> Path:
+    return config_path().parent / "agent_state.sqlite3"
+
+
 def chat_history_path() -> Path:
     return config_path().parent / "chat_history.jsonl"
 

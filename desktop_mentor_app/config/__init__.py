@@ -4,6 +4,7 @@ from __future__ import annotations
 from .migration import CURRENT_CONFIG_SCHEMA_VERSION, migrate_config_data
 from .store import (
     AgentConfig,
+    agent_store_path,
     chat_history_path,
     config_dir_pointer_path,
     config_file_in_dir,
@@ -27,6 +28,7 @@ from .store import (
 __all__ = [
     "AgentConfig",
     "CURRENT_CONFIG_SCHEMA_VERSION",
+    "agent_store_path",
     "chat_history_path",
     "config_dir_pointer_path",
     "config_file_in_dir",

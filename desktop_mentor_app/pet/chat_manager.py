@@ -4,19 +4,28 @@ from __future__ import annotations
 import logging
 from dataclasses import dataclass
 
+from ..agent.context import assemble_agent_prompt
 from ..config.store import AgentConfig
 from ..model_client.agent import call_agent_async
 from ..model_client.base import ModelClient
 from ..state.conversations import (
     append_chat_turn,
-    build_conversation_memory_context,
     create_conversation_session,
     ensure_active_session,
     get_session,
     set_active_session,
 )
+from ..state.agent_store import (
+    TASK_STATUS_AWAITING_TOOL,
+    TASK_STATUS_DONE,
+    TASK_STATUS_ERROR,
+    append_tool_event,
+    record_memory_candidates_from_turn,
+    start_task_run,
+    update_task_run,
+)
 from ..state.memory import append_memory_turn
-from ..state.user_memory import build_user_memory_context, record_user_memory_turn
+from ..state.user_memory import record_user_memory_turn
 from ..tools.executor import execute_control_plan_async
 from ..tools.registry import build_control_plan_from_agent_reply
 from ..tools.types import ControlPlan
@@ -67,6 +76,12 @@ class PetConversationService:
     ) -> AgentReplyResult:
         session = get_session(session_id) or ensure_active_session()
         agent_prompt = self._agent_prompt(config, prompt, session.session_id, use_conversation_context)
+        task = start_task_run(
+            session.session_id,
+            memory_prompt or prompt,
+            agent_prompt=agent_prompt,
+            use_context=use_conversation_context,
+        )
         try:
             reply = await call_agent_async(
                 config,
@@ -77,12 +92,21 @@ class PetConversationService:
         except Exception as exc:
             LOGGER.exception("agent reply failed")
             reply = f"Agent 出错：{type(exc).__name__}: {exc}"
+            update_task_run(task.task_id, status=TASK_STATUS_ERROR, assistant_text=reply, error=str(exc))
             self._append_chat_turn(memory_prompt or prompt, reply, session.session_id)
             return AgentReplyResult(reply, session.session_id, is_error=True)
 
         if config.control_enabled:
             control_plan, cleaned_reply = self._extract_control_plan(reply, config.control_workspace)
             if control_plan is not None:
+                append_tool_event(
+                    session.session_id,
+                    event="agent_requested_control",
+                    plan=control_plan,
+                    task_id=task.task_id,
+                    summary=control_plan.summary(),
+                )
+                update_task_run(task.task_id, status=TASK_STATUS_AWAITING_TOOL, assistant_text=cleaned_reply)
                 if cleaned_reply:
                     self._append_chat_turn(memory_prompt or prompt, cleaned_reply, session.session_id)
                 return AgentReplyResult(
@@ -93,10 +117,12 @@ class PetConversationService:
                 )
 
         self._append_chat_turn(memory_prompt or prompt, reply, session.session_id)
+        self._record_agent_memory_candidates(memory_prompt or prompt, reply, session.session_id, task.task_id)
         if use_conversation_context and getattr(config, "long_term_memory_enabled", False):
             self._record_user_memory(memory_prompt or prompt, reply, session.session_id)
         if use_conversation_context and config.memory_enabled:
             self._append_legacy_memory(memory_prompt or prompt, reply)
+        update_task_run(task.task_id, status=TASK_STATUS_DONE, assistant_text=reply)
         return AgentReplyResult(reply, session.session_id)
 
     async def execute_control_plan_reply(
@@ -106,27 +132,45 @@ class PetConversationService:
         memory_prompt: str,
         session_id: str,
     ) -> ControlExecutionReply:
+        task = start_task_run(
+            session_id,
+            memory_prompt,
+            goal=plan.title,
+            use_context=False,
+        )
         try:
             result = await execute_control_plan_async(plan)
             reply = result.display_text()
         except Exception as exc:
             LOGGER.exception("control execution failed")
             reply = f"电脑操作出错：{type(exc).__name__}: {exc}"
+            append_tool_event(session_id, event="control_failed", plan=plan, task_id=task.task_id, summary=reply)
+            update_task_run(task.task_id, status=TASK_STATUS_ERROR, assistant_text=reply, error=str(exc))
             self._append_chat_turn(memory_prompt, reply, session_id)
             return ControlExecutionReply(reply, session_id, ok=False)
+        append_tool_event(session_id, event="control_executed", plan=plan, result=result, task_id=task.task_id)
+        update_task_run(
+            task.task_id,
+            status=TASK_STATUS_DONE if result.ok else TASK_STATUS_ERROR,
+            assistant_text=reply,
+            error=result.error,
+        )
         self._append_chat_turn(memory_prompt, reply, session_id)
         return ControlExecutionReply(reply, session_id, ok=result.ok)
 
     def record_control_plan_waiting(self, user_prompt: str, plan: ControlPlan, session_id: str) -> None:
+        append_tool_event(session_id, event="awaiting_user_approval", plan=plan, summary=plan.summary())
         self._append_chat_turn(user_prompt, plan.summary() + "\n\n等待用户确认。", session_id)
 
     def record_control_plan_cancelled(self, plan: ControlPlan, session_id: str) -> str:
         reply = f"已取消电脑操作：{plan.title}"
+        append_tool_event(session_id, event="control_cancelled", plan=plan, summary=reply)
         self._append_chat_turn(f"取消电脑操作：{plan.title}", reply, session_id)
         return reply
 
     def record_agent_request_cancelled(self, user_prompt: str, session_id: str) -> str:
         reply = "已取消本次请求。"
+        self._record_agent_memory_candidates(user_prompt, reply, session_id, "")
         self._append_chat_turn(user_prompt, reply, session_id)
         return reply
 
@@ -137,28 +181,12 @@ class PetConversationService:
         session_id: str,
         use_conversation_context: bool,
     ) -> str:
-        if not use_conversation_context:
-            return prompt
-        parts: list[str] = []
-        try:
-            user_memory_context = build_user_memory_context(
-                prompt,
-                getattr(config, "long_term_memory_items", getattr(config, "memory_turns", 8)),
-            ) if getattr(config, "long_term_memory_enabled", False) else ""
-            if user_memory_context:
-                parts.append(user_memory_context)
-        except Exception:
-            LOGGER.exception("failed to build user memory context")
-        try:
-            memory_context = build_conversation_memory_context(session_id, config.memory_turns)
-            if memory_context:
-                parts.append(memory_context)
-        except Exception:
-            LOGGER.exception("failed to build conversation memory context")
-        if not parts:
-            return prompt
-        context_text = "\n\n".join(parts)
-        return f"{context_text}\n\n当前输入:\n{prompt}"
+        return assemble_agent_prompt(
+            config,
+            prompt,
+            session_id=session_id,
+            use_conversation_context=use_conversation_context,
+        )
 
     def _extract_control_plan(self, reply: str, workspace: str) -> tuple[ControlPlan | None, str]:
         try:
@@ -184,3 +212,9 @@ class PetConversationService:
             record_user_memory_turn(prompt, reply, session_id=session_id)
         except Exception:
             LOGGER.exception("failed to record user memory")
+
+    def _record_agent_memory_candidates(self, prompt: str, reply: str, session_id: str, task_id: str) -> None:
+        try:
+            record_memory_candidates_from_turn(prompt, reply, session_id=session_id, task_id=task_id)
+        except Exception:
+            LOGGER.exception("failed to record agent memory candidates")

@@ -260,6 +260,8 @@ python3 desktop_mentor.py --load-sticker-dir /path/to/stickers
 - 用户长期记忆保存在本机 `user_memory.json`，设置中启用后会随模型上下文一起注入。
 - 对话窗口左侧的 `记忆` 可以手动新增、编辑、停用或删除长期记忆。
 - 模型回复使用 HTML Markdown 渲染，支持代码高亮、表格和 LaTeX 公式；用户输入按普通文本显示。
+
+本地 agent 内核会额外维护 `agent_state.sqlite3`，用于记录任务运行、电脑控制工具证据和待确认的记忆候选。它不替代聊天记录，而是帮助下一轮请求恢复“上次任务做到了哪一步”和“哪些工具结果已经发生过”。
 - 输入框按 Enter 发送消息，Shift+Enter 插入换行。
 - 请求处理中可点 `取消` 停止等待；较长的导师回复会显示 `完整回复` 入口。
 
@@ -336,6 +338,7 @@ CONTROL_REQUEST: 读取 D:\DATA\Desktop\Nature_manuscript.txt
 
 - `config.json`
 - `conversations/`
+- `agent_state.sqlite3`
 - `memory.jsonl`
 - `user_memory.json`
 - `todos.json`
