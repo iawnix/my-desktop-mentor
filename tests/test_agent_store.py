@@ -6,6 +6,7 @@ import unittest
 
 from desktop_mentor_app.agent.context import assemble_agent_prompt
 from desktop_mentor_app.config.store import AgentConfig, agent_store_path
+from desktop_mentor_app.pet.chat_manager import build_control_follow_up_prompt
 from desktop_mentor_app.model_client.base import ModelResponse
 from desktop_mentor_app.pet.chat_manager import PetConversationService
 from desktop_mentor_app.state.agent_store import (
@@ -158,8 +159,17 @@ class PetConversationServiceAgentStoreTests(unittest.IsolatedAsyncioTestCase):
         assert result.control_plan is not None
         self.assertEqual(result.control_plan.action, "read_file")
         self.assertTrue(result.text)
+        self.assertEqual(result.prompt_text, "请帮我读 README")
         self.assertEqual(tasks[0].status, TASK_STATUS_AWAITING_TOOL)
         self.assertEqual(events[0].event, "agent_requested_control")
+
+    def test_build_control_follow_up_prompt_includes_base_prompt_and_result(self) -> None:
+        prompt = build_control_follow_up_prompt("请帮我继续处理这个任务", "读取文件", "README content")
+
+        self.assertIn("当前目标：请帮我继续处理这个任务", prompt)
+        self.assertIn("刚刚完成：读取文件", prompt)
+        self.assertIn("工具结果：", prompt)
+        self.assertIn("如果问题还没解决", prompt)
 
 
 if __name__ == "__main__":

@@ -40,6 +40,7 @@ class AgentReplyResult:
     is_error: bool = False
     control_plan: ControlPlan | None = None
     control_source_text: str = ""
+    prompt_text: str = ""
 
 
 @dataclass(frozen=True)
@@ -47,6 +48,21 @@ class ControlExecutionReply:
     text: str
     session_id: str
     ok: bool
+
+
+def build_control_follow_up_prompt(base_prompt: str, plan_title: str, result_text: str) -> str:
+    prompt = str(base_prompt or "").strip()
+    title = str(plan_title or "").strip()
+    result = str(result_text or "").strip()
+    parts = ["继续处理上一个问题。"]
+    if prompt:
+        parts.append(f"当前目标：{prompt}")
+    if title:
+        parts.append(f"刚刚完成：{title}")
+    if result:
+        parts.append(f"工具结果：\n{result}")
+    parts.append("如果问题还没解决，请继续下一步；如果已经解决，请直接给出最终答复。")
+    return "\n\n".join(parts)
 
 
 class PetConversationService:
@@ -115,6 +131,7 @@ class PetConversationService:
                     session.session_id,
                     control_plan=control_plan,
                     control_source_text=control_plan.source_text,
+                    prompt_text=memory_prompt or prompt,
                 )
         reply_text = str(response.content or "").strip()
         if not reply_text:

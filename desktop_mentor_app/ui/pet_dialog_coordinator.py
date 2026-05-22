@@ -13,6 +13,7 @@ from PySide6.QtWidgets import QDialog
 from ..config.store import save_config, save_config_directory
 from ..constants.pet import IDLE_MODE_FULLSCREEN
 from ..constants.stickers import STICKER_ACTION_ERROR, STICKER_ACTION_TAP, STICKER_ACTION_THINKING
+from ..pet.chat_manager import build_control_follow_up_prompt
 from ..tools.drop_context import compose_prompt_with_drop_context
 from ..state.conversations import (
     clear_chat_history,
@@ -232,7 +233,12 @@ class PetDialogCoordinator:
         if pet.config.control_enabled:
             control_plan = build_control_plan(user_prompt, pet.config.control_workspace)
             if control_plan is not None:
-                self.handle_control_plan(control_plan, user_prompt, active_session.session_id)
+                self.handle_control_plan(
+                    control_plan,
+                    user_prompt,
+                    active_session.session_id,
+                    use_conversation_context,
+                )
                 return
         if pet.chat_dialog is not None and pet.chat_dialog.drop_context_was_removed():
             pet.last_drop_paths = []
@@ -241,7 +247,7 @@ class PetDialogCoordinator:
         prompt = compose_prompt_with_drop_context(user_prompt, drop_context)
         pet.show_bubble("导师处理中。", duration=min(1.8, pet.message_duration()), action=None)
         pet.play_action(STICKER_ACTION_THINKING, loop=True)
-        self.queue_agent_reply(prompt, user_prompt, active_session.session_id, use_conversation_context)
+        self.queue_agent_reply(prompt, prompt, active_session.session_id, use_conversation_context)
 
     def queue_agent_reply(
         self,
@@ -293,23 +299,36 @@ class PetDialogCoordinator:
             self.refresh_chat_dialog_sessions()
         pet.show_bubble(reply, duration=pet.message_duration(), action=STICKER_ACTION_TAP)
 
-    def handle_control_plan(self, plan: ControlPlan, user_prompt: str, session_id: str) -> None:
+    def handle_control_plan(
+        self,
+        plan: ControlPlan,
+        user_prompt: str,
+        session_id: str,
+        use_conversation_context: bool,
+    ) -> None:
         pet = self.pet
         if plan.is_blocked:
             if pet.chat_dialog is not None:
                 pet.chat_dialog.set_waiting(True)
-            self.queue_control_reply(plan, user_prompt, session_id)
+            self.queue_control_reply(plan, user_prompt, session_id, use_conversation_context, False)
             return
         if plan.requires_confirmation:
-            self.request_control_authorization(plan, user_prompt, session_id)
+            self.request_control_authorization(plan, user_prompt, session_id, use_conversation_context, False)
             return
         pet.show_bubble("执行本地只读操作。", duration=min(1.8, pet.message_duration()), action=STICKER_ACTION_THINKING)
         pet.play_action(STICKER_ACTION_THINKING, loop=True)
-        self.queue_control_reply(plan, user_prompt, session_id)
+        self.queue_control_reply(plan, user_prompt, session_id, use_conversation_context, False)
 
-    def request_control_authorization(self, plan: ControlPlan, user_prompt: str, session_id: str) -> None:
+    def request_control_authorization(
+        self,
+        plan: ControlPlan,
+        user_prompt: str,
+        session_id: str,
+        use_conversation_context: bool,
+        auto_continue: bool,
+    ) -> None:
         pet = self.pet
-        pet.pending_control_plans[plan.plan_id] = (plan, user_prompt, session_id)
+        pet.pending_control_plans[plan.plan_id] = (plan, user_prompt, session_id, use_conversation_context, auto_continue)
         if pet.chat_dialog is None:
             self.open_chat()
         if pet.chat_dialog is not None:
@@ -334,33 +353,47 @@ class PetDialogCoordinator:
         if pending is None:
             pet.agent_signals.error_ready.emit("电脑操作计划已过期或不存在。", "")
             return
-        plan, _user_prompt, session_id = pending
+        plan, user_prompt, session_id, use_conversation_context, auto_continue = pending
         if pet.chat_dialog is not None:
             pet.chat_dialog.set_waiting(True)
         pet.show_bubble("正在执行电脑操作。", duration=min(1.8, pet.message_duration()), action=STICKER_ACTION_THINKING)
         pet.play_action(STICKER_ACTION_THINKING, loop=True)
-        self.queue_control_reply(plan, f"执行确认：{plan.title}", session_id)
+        self.queue_control_reply(plan, user_prompt, session_id, use_conversation_context, auto_continue)
 
     def cancel_control_plan(self, plan_id: str) -> None:
         pet = self.pet
         pending = pet.pending_control_plans.pop(plan_id, None)
         if pending is None:
             return
-        plan, _user_prompt, session_id = pending
+        plan, _user_prompt, session_id, _use_conversation_context, _auto_continue = pending
         reply = pet.chat_service.record_control_plan_cancelled(plan, session_id)
         pet.agent_signals.reply_ready.emit(reply, session_id)
 
-    def queue_control_reply(self, plan: ControlPlan, memory_prompt: str, session_id: str) -> None:
+    def queue_control_reply(
+        self,
+        plan: ControlPlan,
+        memory_prompt: str,
+        session_id: str,
+        use_conversation_context: bool,
+        auto_continue: bool,
+    ) -> None:
         pet = self.pet
         pet.task_runner.run_async(
-            lambda: self.fetch_control_reply(plan, memory_prompt, session_id),
+            lambda: self.fetch_control_reply(plan, memory_prompt, session_id, use_conversation_context, auto_continue),
             on_error=lambda exc, target=session_id: pet.agent_signals.error_ready.emit(
                 f"电脑操作出错：{type(exc).__name__}: {exc}",
                 target,
             ),
         )
 
-    async def fetch_control_reply(self, plan: ControlPlan, memory_prompt: str, session_id: str) -> None:
+    async def fetch_control_reply(
+        self,
+        plan: ControlPlan,
+        memory_prompt: str,
+        session_id: str,
+        use_conversation_context: bool,
+        auto_continue: bool,
+    ) -> None:
         pet = self.pet
         result = await pet.chat_service.execute_control_plan_reply(
             plan,
@@ -369,6 +402,13 @@ class PetDialogCoordinator:
         )
         if result.ok:
             pet.agent_signals.reply_ready.emit(result.text, result.session_id)
+            if auto_continue:
+                follow_up_prompt = build_control_follow_up_prompt(memory_prompt, plan.title, result.text)
+                if pet.chat_dialog is not None and pet.chat_dialog.active_session_id == session_id:
+                    pet.chat_dialog.set_waiting(True)
+                pet.show_bubble("继续处理下一步。", duration=min(1.8, pet.message_duration()), action=STICKER_ACTION_THINKING)
+                pet.play_action(STICKER_ACTION_THINKING, loop=True)
+                self.queue_agent_reply(follow_up_prompt, memory_prompt, session_id, use_conversation_context)
         else:
             pet.agent_signals.error_ready.emit(result.text, result.session_id)
 
@@ -387,7 +427,7 @@ class PetDialogCoordinator:
         )
         pet.show_bubble("导师正在看文件。", duration=min(1.8, pet.message_duration()), action=None)
         pet.play_action(STICKER_ACTION_THINKING, loop=True)
-        self.queue_agent_reply(prompt, "只问文件", active_session.session_id, self.context_default_enabled())
+        self.queue_agent_reply(prompt, prompt, active_session.session_id, self.context_default_enabled())
 
     def open_drop_summary(self) -> None:
         pet = self.pet
@@ -437,6 +477,8 @@ class PetDialogCoordinator:
         assistant_text: str,
         source_text: str,
         session_id: str,
+        prompt_text: str,
+        use_conversation_context: bool,
     ) -> None:
         pet = self.pet
         if not isinstance(plan, ControlPlan):
@@ -458,4 +500,10 @@ class PetDialogCoordinator:
             pet.chat_dialog.show()
             pet.chat_dialog.raise_()
             pet.chat_dialog.activate_for_input()
-        self.request_control_authorization(plan, source_text or plan.source_text, session_id)
+        self.request_control_authorization(
+            plan,
+            prompt_text or source_text or plan.source_text,
+            session_id,
+            use_conversation_context,
+            True,
+        )

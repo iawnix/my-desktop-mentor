@@ -112,6 +112,7 @@ class ChatDialog(QDialog):
         self.history_scroll = transparent_scroll_area()
         self.history_scroll.setWidgetResizable(True)
         self.history_scroll.setWidget(self.history_content)
+        self.history_scroll.verticalScrollBar().rangeChanged.connect(self._on_history_scroll_range_changed)
 
         self.text_edit = ChatInputEdit()
         self.text_edit.setObjectName("chatInput")
@@ -557,6 +558,13 @@ class ChatDialog(QDialog):
         self.message_widgets.append(row)
         self.scroll_to_bottom()
 
+    def _on_history_scroll_range_changed(self, _minimum: int, _maximum: int) -> None:
+        self.scroll_to_bottom()
+
+    def _scroll_history_to_bottom_now(self) -> None:
+        scrollbar = self.history_scroll.verticalScrollBar()
+        scrollbar.setValue(scrollbar.maximum())
+
     def make_tool_detail_panel(self, details: str) -> QFrame:
         panel = QFrame()
         panel.setObjectName("toolDetailPanel")
@@ -586,7 +594,8 @@ class ChatDialog(QDialog):
         status_label.setText(status)
 
     def scroll_to_bottom(self) -> None:
-        QTimer.singleShot(0, lambda: self.history_scroll.verticalScrollBar().setValue(self.history_scroll.verticalScrollBar().maximum()))
+        QTimer.singleShot(0, self._scroll_history_to_bottom_now)
+        QTimer.singleShot(80, self._scroll_history_to_bottom_now)
 
     def set_waiting(self, waiting: bool) -> None:
         self.waiting_for_reply = waiting

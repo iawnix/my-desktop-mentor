@@ -80,7 +80,7 @@ class AgentSignals(QObject):
     reply_ready = Signal(str, str)
     error_ready = Signal(str, str)
     # PySide6 limitation: object signals are used for dataclass payloads.
-    control_plan_ready = Signal(object, str, str, str)
+    control_plan_ready = Signal(object, str, str, str, str, bool)
 
 
 class DesktopMentorPet(QWidget):
@@ -137,7 +137,7 @@ class DesktopMentorPet(QWidget):
         self.last_drop_context = ""
         self.last_drop_paths: list[str] = []
         self.todo_bubbles: list[dict[str, object]] = []
-        self.pending_control_plans: dict[str, tuple[ControlPlan, str, str]] = {}
+        self.pending_control_plans: dict[str, tuple[ControlPlan, str, str, bool, bool]] = {}
         self.todo_stack_height = 0
         self.chat_button_pressed = False
         self.settings_button_pressed = False
@@ -382,8 +382,17 @@ class DesktopMentorPet(QWidget):
         assistant_text: str,
         source_text: str,
         session_id: str,
+        prompt_text: str,
+        use_conversation_context: bool,
     ) -> None:
-        self.dialog_coordinator.show_agent_control_request(plan, assistant_text, source_text, session_id)
+        self.dialog_coordinator.show_agent_control_request(
+            plan,
+            assistant_text,
+            source_text,
+            session_id,
+            prompt_text,
+            use_conversation_context,
+        )
 
     def mark_interaction(self) -> None:
         self.idle_manager.mark_interaction()
@@ -819,8 +828,21 @@ class DesktopMentorPet(QWidget):
     def handle_control_plan(self, plan: ControlPlan, user_prompt: str, session_id: str) -> None:
         self.dialog_coordinator.handle_control_plan(plan, user_prompt, session_id)
 
-    def request_control_authorization(self, plan: ControlPlan, user_prompt: str, session_id: str) -> None:
-        self.dialog_coordinator.request_control_authorization(plan, user_prompt, session_id)
+    def request_control_authorization(
+        self,
+        plan: ControlPlan,
+        user_prompt: str,
+        session_id: str,
+        use_conversation_context: bool,
+        auto_continue: bool,
+    ) -> None:
+        self.dialog_coordinator.request_control_authorization(
+            plan,
+            user_prompt,
+            session_id,
+            use_conversation_context,
+            auto_continue,
+        )
 
     def approve_control_plan(self, plan_id: str) -> None:
         self.dialog_coordinator.approve_control_plan(plan_id)
@@ -828,11 +850,37 @@ class DesktopMentorPet(QWidget):
     def cancel_control_plan(self, plan_id: str) -> None:
         self.dialog_coordinator.cancel_control_plan(plan_id)
 
-    def queue_control_reply(self, plan: ControlPlan, memory_prompt: str, session_id: str) -> None:
-        self.dialog_coordinator.queue_control_reply(plan, memory_prompt, session_id)
+    def queue_control_reply(
+        self,
+        plan: ControlPlan,
+        memory_prompt: str,
+        session_id: str,
+        use_conversation_context: bool,
+        auto_continue: bool,
+    ) -> None:
+        self.dialog_coordinator.queue_control_reply(
+            plan,
+            memory_prompt,
+            session_id,
+            use_conversation_context,
+            auto_continue,
+        )
 
-    async def fetch_control_reply(self, plan: ControlPlan, memory_prompt: str, session_id: str) -> None:
-        await self.dialog_coordinator.fetch_control_reply(plan, memory_prompt, session_id)
+    async def fetch_control_reply(
+        self,
+        plan: ControlPlan,
+        memory_prompt: str,
+        session_id: str,
+        use_conversation_context: bool,
+        auto_continue: bool,
+    ) -> None:
+        await self.dialog_coordinator.fetch_control_reply(
+            plan,
+            memory_prompt,
+            session_id,
+            use_conversation_context,
+            auto_continue,
+        )
 
     def ask_about_dropped_files(self) -> None:
         self.dialog_coordinator.ask_about_dropped_files()
@@ -866,6 +914,8 @@ class DesktopMentorPet(QWidget):
                 result.text,
                 result.control_source_text,
                 result.session_id,
+                result.prompt_text or prompt,
+                use_conversation_context,
             )
             return
         if result.is_error:
