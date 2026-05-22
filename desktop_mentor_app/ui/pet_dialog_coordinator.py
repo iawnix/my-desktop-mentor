@@ -13,7 +13,6 @@ from PySide6.QtWidgets import QDialog
 from ..config.store import save_config, save_config_directory
 from ..constants.pet import IDLE_MODE_FULLSCREEN
 from ..constants.stickers import STICKER_ACTION_ERROR, STICKER_ACTION_TAP, STICKER_ACTION_THINKING
-from ..pet.chat_manager import build_control_follow_up_prompt
 from ..tools.drop_context import compose_prompt_with_drop_context
 from ..state.conversations import (
     clear_chat_history,
@@ -400,17 +399,37 @@ class PetDialogCoordinator:
             memory_prompt=memory_prompt,
             session_id=session_id,
         )
-        if result.ok:
+        if result.ok or auto_continue:
             pet.agent_signals.reply_ready.emit(result.text, result.session_id)
-            if auto_continue:
-                follow_up_prompt = build_control_follow_up_prompt(memory_prompt, plan.title, result.text)
-                if pet.chat_dialog is not None and pet.chat_dialog.active_session_id == session_id:
-                    pet.chat_dialog.set_waiting(True)
-                pet.show_bubble("继续处理下一步。", duration=min(1.8, pet.message_duration()), action=STICKER_ACTION_THINKING)
-                pet.play_action(STICKER_ACTION_THINKING, loop=True)
-                self.queue_agent_reply(follow_up_prompt, memory_prompt, session_id, use_conversation_context)
         else:
             pet.agent_signals.error_ready.emit(result.text, result.session_id)
+            return
+        if auto_continue and result.control_result is not None:
+            if pet.chat_dialog is not None and pet.chat_dialog.active_session_id == session_id:
+                pet.chat_dialog.set_waiting(True)
+            pet.show_bubble("继续处理下一步。", duration=min(1.8, pet.message_duration()), action=STICKER_ACTION_THINKING)
+            pet.play_action(STICKER_ACTION_THINKING, loop=True)
+            next_result = await pet.chat_service.continue_agent_after_control_result(
+                pet.config,
+                plan,
+                result.control_result,
+                session_id=session_id,
+            )
+            if next_result.control_plan is not None:
+                pet.agent_signals.control_plan_ready.emit(
+                    next_result.control_plan,
+                    next_result.text,
+                    next_result.control_source_text,
+                    next_result.session_id,
+                    next_result.prompt_text or memory_prompt,
+                    use_conversation_context,
+                )
+                return
+            if next_result.is_error:
+                pet.agent_signals.error_ready.emit(next_result.text, next_result.session_id)
+                return
+            pet.agent_signals.reply_ready.emit(next_result.text, next_result.session_id)
+            return
 
     def ask_about_dropped_files(self) -> None:
         pet = self.pet

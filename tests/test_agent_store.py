@@ -6,7 +6,6 @@ import unittest
 
 from desktop_mentor_app.agent.context import assemble_agent_prompt
 from desktop_mentor_app.config.store import AgentConfig, agent_store_path
-from desktop_mentor_app.pet.chat_manager import build_control_follow_up_prompt
 from desktop_mentor_app.model_client.base import ModelResponse
 from desktop_mentor_app.pet.chat_manager import PetConversationService
 from desktop_mentor_app.state.agent_store import (
@@ -102,9 +101,17 @@ class AgentStoreTests(unittest.TestCase):
 
 
 class FakeModelClient:
-    def __init__(self, *, content: str = "记好了。", tool_calls: list[ToolCall] | None = None) -> None:
+    def __init__(
+        self,
+        *,
+        content: str = "记好了。",
+        tool_calls: list[ToolCall] | None = None,
+        responses: list[ModelResponse] | None = None,
+    ) -> None:
         self.content = content
         self.tool_calls = tool_calls
+        self.responses = list(responses or [])
+        self.calls: list[dict[str, object]] = []
 
     async def complete(
         self,
@@ -118,6 +125,20 @@ class FakeModelClient:
         tools: list[dict[str, object]] | None = None,
         tool_choice: object | None = None,
     ) -> ModelResponse:
+        self.calls.append(
+            {
+                "url": url,
+                "api_key": api_key,
+                "model": model,
+                "messages": messages,
+                "max_tokens": max_tokens,
+                "temperature": temperature,
+                "tools": tools,
+                "tool_choice": tool_choice,
+            }
+        )
+        if self.responses:
+            return self.responses.pop(0)
         return ModelResponse(self.content, tool_calls=self.tool_calls)
 
 
@@ -163,13 +184,44 @@ class PetConversationServiceAgentStoreTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(tasks[0].status, TASK_STATUS_AWAITING_TOOL)
         self.assertEqual(events[0].event, "agent_requested_control")
 
-    def test_build_control_follow_up_prompt_includes_base_prompt_and_result(self) -> None:
-        prompt = build_control_follow_up_prompt("请帮我继续处理这个任务", "读取文件", "README content")
+    async def test_tool_result_continuation_uses_tool_role_messages(self) -> None:
+        tool_call = ToolCall("tool-1", "read_file", {"path": "README.md"}, '{"path":"README.md"}')
+        client = FakeModelClient(
+            responses=[
+                ModelResponse("先读文件。", tool_calls=[tool_call]),
+                ModelResponse("已基于工具结果继续处理。"),
+            ]
+        )
+        service = PetConversationService(client)
+        config = AgentConfig(api_url="http://model.test/v1", model="mentor-model", control_enabled=True)
 
-        self.assertIn("当前目标：请帮我继续处理这个任务", prompt)
-        self.assertIn("刚刚完成：读取文件", prompt)
-        self.assertIn("工具结果：", prompt)
-        self.assertIn("如果问题还没解决", prompt)
+        result = await service.fetch_agent_reply(config, "请帮我读 README", use_conversation_context=False)
+
+        self.assertIsNotNone(result.control_plan)
+        assert result.control_plan is not None
+        control_result = ControlResult(
+            result.control_plan.plan_id,
+            result.control_plan.title,
+            True,
+            "README content",
+            result.control_plan.permission,
+        )
+        follow_up = await service.continue_agent_after_control_result(
+            config,
+            result.control_plan,
+            control_result,
+            session_id=result.session_id,
+        )
+
+        self.assertEqual(follow_up.text, "已基于工具结果继续处理。")
+        self.assertEqual(len(client.calls), 2)
+        second_messages = client.calls[1]["messages"]
+        assert isinstance(second_messages, list)
+        self.assertEqual(second_messages[-2]["role"], "assistant")
+        self.assertEqual(second_messages[-2]["tool_calls"][0]["id"], "tool-1")
+        self.assertEqual(second_messages[-1]["role"], "tool")
+        self.assertEqual(second_messages[-1]["tool_call_id"], "tool-1")
+        self.assertIn("README content", second_messages[-1]["content"])
 
 
 if __name__ == "__main__":

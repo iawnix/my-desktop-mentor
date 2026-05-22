@@ -9,7 +9,7 @@ from typing import TYPE_CHECKING
 from ..constants.model import DEFAULT_MODEL, DEFAULT_PERSONALITY_PROMPT, MAX_AGENT_REPLY_CHARS, MAX_AGENT_REPLY_TOKENS
 from ..constants.pet import DEFAULT_IDLE_MESSAGE
 from ..tools.registry import build_control_tool_schemas
-from .base import ModelClient, SyncModelClient
+from .base import ModelClient, SyncModelClient, ToolCall
 from .openai_compatible import OpenAICompatibleModelClient
 
 if TYPE_CHECKING:
@@ -132,6 +132,39 @@ def build_agent_messages(
     return messages
 
 
+def build_assistant_tool_message(tool_call: ToolCall, content: str = "") -> dict[str, object]:
+    arguments = str(tool_call.raw_arguments or "").strip()
+    if not arguments:
+        try:
+            arguments = json.dumps(tool_call.arguments or {}, ensure_ascii=False)
+        except Exception:
+            arguments = ""
+    message: dict[str, object] = {
+        "role": "assistant",
+        "content": content if content else None,
+        "tool_calls": [
+            {
+                "id": tool_call.id,
+                "type": "function",
+                "function": {
+                    "name": tool_call.name,
+                    "arguments": arguments,
+                },
+            }
+        ],
+    }
+    return message
+
+
+def build_tool_result_message(tool_call: ToolCall, content: str) -> dict[str, object]:
+    return {
+        "role": "tool",
+        "tool_call_id": tool_call.id,
+        "name": tool_call.name,
+        "content": content,
+    }
+
+
 def _build_agent_tools(config: AgentConfig, tools: list[dict[str, object]] | None) -> list[dict[str, object]] | None:
     if tools is not None:
         return tools
@@ -140,11 +173,20 @@ def _build_agent_tools(config: AgentConfig, tools: list[dict[str, object]] | Non
     return None
 
 
-async def complete_agent_response_async(
+def _last_user_text(messages: list[dict[str, object]]) -> str:
+    for message in reversed(messages):
+        if str(message.get("role", "")).strip() != "user":
+            continue
+        content = str(message.get("content", "") or "").strip()
+        if content:
+            return content
+    return ""
+
+
+async def complete_agent_response_from_messages_async(
     config: AgentConfig,
-    user_text: str,
+    messages: list[dict[str, object]],
     *,
-    include_legacy_memory: bool | None = None,
     client: ModelClient | None = None,
     tools: list[dict[str, object]] | None = None,
     tool_choice: object | None = None,
@@ -152,8 +194,9 @@ async def complete_agent_response_async(
     from .base import ModelResponse
 
     url = normalize_chat_url(config.api_url)
+    fallback_text = _last_user_text(messages)
     if not url:
-        return ModelResponse(local_agent_reply(user_text))
+        return ModelResponse(local_agent_reply(fallback_text))
     model_client = client or OpenAICompatibleModelClient()
     request_tools = _build_agent_tools(config, tools)
     request_tool_choice = tool_choice
@@ -164,7 +207,7 @@ async def complete_agent_response_async(
             url=url,
             api_key=config.api_key,
             model=config.model or DEFAULT_MODEL,
-            messages=build_agent_messages(config, user_text, include_legacy_memory=include_legacy_memory),
+            messages=messages,
             max_tokens=MAX_AGENT_REPLY_TOKENS,
             temperature=0.8,
             tools=request_tools,
@@ -179,7 +222,7 @@ async def complete_agent_response_async(
                     url=url,
                     api_key=config.api_key,
                     model=config.model or DEFAULT_MODEL,
-                    messages=build_agent_messages(config, user_text, include_legacy_memory=include_legacy_memory),
+                    messages=messages,
                     max_tokens=MAX_AGENT_REPLY_TOKENS,
                     temperature=0.8,
                 )
@@ -188,6 +231,25 @@ async def complete_agent_response_async(
                 exc = retry_exc
         LOGGER.warning("agent request failed: %s", exc)
         return ModelResponse(f"接口没接上。我先给本地建议：把目标、材料和卡点列出来。{type(exc).__name__}")
+
+
+async def complete_agent_response_async(
+    config: AgentConfig,
+    user_text: str,
+    *,
+    include_legacy_memory: bool | None = None,
+    client: ModelClient | None = None,
+    tools: list[dict[str, object]] | None = None,
+    tool_choice: object | None = None,
+) -> "ModelResponse":
+    messages = build_agent_messages(config, user_text, include_legacy_memory=include_legacy_memory)
+    return await complete_agent_response_from_messages_async(
+        config,
+        messages,
+        client=client,
+        tools=tools,
+        tool_choice=tool_choice,
+    )
 
 
 async def call_agent_async(

@@ -6,8 +6,14 @@ from dataclasses import dataclass
 
 from ..agent.context import assemble_agent_prompt
 from ..config.store import AgentConfig
-from ..model_client.agent import complete_agent_response_async, local_agent_reply
-from ..model_client.base import ModelClient, ModelResponse
+from ..model_client.agent import (
+    build_agent_messages,
+    build_assistant_tool_message,
+    build_tool_result_message,
+    complete_agent_response_from_messages_async,
+    local_agent_reply,
+)
+from ..model_client.base import ModelClient, ModelResponse, ToolCall
 from ..state.conversations import (
     append_chat_turn,
     create_conversation_session,
@@ -28,9 +34,18 @@ from ..state.memory import append_memory_turn
 from ..state.user_memory import record_user_memory_turn
 from ..tools.executor import execute_control_plan_async
 from ..tools.registry import build_control_plan_from_model_response
-from ..tools.types import ControlPlan
+from ..tools.types import ControlPlan, ControlResult
 
 LOGGER = logging.getLogger(__name__)
+
+
+@dataclass(frozen=True)
+class AgentLoopState:
+    messages: list[dict[str, object]]
+    tool_call: ToolCall
+    assistant_content: str
+    prompt_text: str
+    use_conversation_context: bool
 
 
 @dataclass(frozen=True)
@@ -48,26 +63,13 @@ class ControlExecutionReply:
     text: str
     session_id: str
     ok: bool
-
-
-def build_control_follow_up_prompt(base_prompt: str, plan_title: str, result_text: str) -> str:
-    prompt = str(base_prompt or "").strip()
-    title = str(plan_title or "").strip()
-    result = str(result_text or "").strip()
-    parts = ["继续处理上一个问题。"]
-    if prompt:
-        parts.append(f"当前目标：{prompt}")
-    if title:
-        parts.append(f"刚刚完成：{title}")
-    if result:
-        parts.append(f"工具结果：\n{result}")
-    parts.append("如果问题还没解决，请继续下一步；如果已经解决，请直接给出最终答复。")
-    return "\n\n".join(parts)
+    control_result: ControlResult | None = None
 
 
 class PetConversationService:
     def __init__(self, model_client: ModelClient | None = None) -> None:
         self._model_client = model_client
+        self._pending_agent_loops: dict[str, AgentLoopState] = {}
 
     def session_for_context_policy(
         self,
@@ -92,6 +94,11 @@ class PetConversationService:
     ) -> AgentReplyResult:
         session = get_session(session_id) or ensure_active_session()
         agent_prompt = self._agent_prompt(config, prompt, session.session_id, use_conversation_context)
+        messages = build_agent_messages(
+            config,
+            agent_prompt,
+            include_legacy_memory=bool(use_conversation_context and config.memory_enabled),
+        )
         task = start_task_run(
             session.session_id,
             memory_prompt or prompt,
@@ -99,12 +106,7 @@ class PetConversationService:
             use_context=use_conversation_context,
         )
         try:
-            response = await complete_agent_response_async(
-                config,
-                agent_prompt,
-                include_legacy_memory=bool(use_conversation_context and config.memory_enabled),
-                client=self._model_client,
-            )
+            response = await complete_agent_response_from_messages_async(config, messages, client=self._model_client)
         except Exception as exc:
             LOGGER.exception("agent reply failed")
             error_reply = f"Agent 出错：{type(exc).__name__}: {exc}"
@@ -112,39 +114,15 @@ class PetConversationService:
             self._append_chat_turn(memory_prompt or prompt, error_reply, session.session_id)
             return AgentReplyResult(error_reply, session.session_id, is_error=True)
 
-        if config.control_enabled:
-            control_plan, assistant_text = self._extract_control_plan(response, config.control_workspace)
-            if control_plan is not None:
-                display_text = assistant_text or control_plan.summary()
-                append_tool_event(
-                    session.session_id,
-                    event="agent_requested_control",
-                    plan=control_plan,
-                    task_id=task.task_id,
-                    summary=control_plan.summary(),
-                )
-                update_task_run(task.task_id, status=TASK_STATUS_AWAITING_TOOL, assistant_text=display_text)
-                if display_text:
-                    self._append_chat_turn(memory_prompt or prompt, display_text, session.session_id)
-                return AgentReplyResult(
-                    display_text,
-                    session.session_id,
-                    control_plan=control_plan,
-                    control_source_text=control_plan.source_text,
-                    prompt_text=memory_prompt or prompt,
-                )
-        reply_text = str(response.content or "").strip()
-        if not reply_text:
-            reply_text = self._fallback_reply(memory_prompt or prompt)
-
-        self._append_chat_turn(memory_prompt or prompt, reply_text, session.session_id)
-        self._record_agent_memory_candidates(memory_prompt or prompt, reply_text, session.session_id, task.task_id)
-        if use_conversation_context and getattr(config, "long_term_memory_enabled", False):
-            self._record_user_memory(memory_prompt or prompt, reply_text, session.session_id)
-        if use_conversation_context and config.memory_enabled:
-            self._append_legacy_memory(memory_prompt or prompt, reply_text)
-        update_task_run(task.task_id, status=TASK_STATUS_DONE, assistant_text=reply_text)
-        return AgentReplyResult(reply_text, session.session_id)
+        return self._finalize_model_response(
+            config,
+            response,
+            prompt_text=memory_prompt or prompt,
+            session_id=session.session_id,
+            use_conversation_context=use_conversation_context,
+            task_id=task.task_id,
+            messages=messages,
+        )
 
     async def execute_control_plan_reply(
         self,
@@ -164,11 +142,12 @@ class PetConversationService:
             reply = result.display_text()
         except Exception as exc:
             LOGGER.exception("control execution failed")
-            reply = f"电脑操作出错：{type(exc).__name__}: {exc}"
-            append_tool_event(session_id, event="control_failed", plan=plan, task_id=task.task_id, summary=reply)
-            update_task_run(task.task_id, status=TASK_STATUS_ERROR, assistant_text=reply, error=str(exc))
+            result = ControlResult(plan.plan_id, plan.title, False, "", plan.permission, error=f"{type(exc).__name__}: {exc}")
+            reply = result.display_text()
+            append_tool_event(session_id, event="control_failed", plan=plan, result=result, task_id=task.task_id, summary=reply)
+            update_task_run(task.task_id, status=TASK_STATUS_ERROR, assistant_text=reply, error=result.error)
             self._append_chat_turn(memory_prompt, reply, session_id)
-            return ControlExecutionReply(reply, session_id, ok=False)
+            return ControlExecutionReply(reply, session_id, ok=False, control_result=result)
         append_tool_event(session_id, event="control_executed", plan=plan, result=result, task_id=task.task_id)
         update_task_run(
             task.task_id,
@@ -177,13 +156,55 @@ class PetConversationService:
             error=result.error,
         )
         self._append_chat_turn(memory_prompt, reply, session_id)
-        return ControlExecutionReply(reply, session_id, ok=result.ok)
+        return ControlExecutionReply(reply, session_id, ok=result.ok, control_result=result)
+
+    async def continue_agent_after_control_result(
+        self,
+        config: AgentConfig,
+        plan: ControlPlan,
+        control_result: ControlResult,
+        *,
+        session_id: str,
+    ) -> AgentReplyResult:
+        state = self._pending_agent_loops.pop(plan.plan_id, None)
+        if state is None:
+            LOGGER.warning("missing agent loop state for plan %s", plan.plan_id)
+            return AgentReplyResult(control_result.display_text(), session_id, is_error=True)
+
+        tool_message = build_tool_result_message(state.tool_call, control_result.display_text())
+        assistant_message = build_assistant_tool_message(state.tool_call, state.assistant_content)
+        messages = [*state.messages, assistant_message, tool_message]
+        task = start_task_run(
+            session_id,
+            state.prompt_text,
+            goal=state.prompt_text,
+            use_context=state.use_conversation_context,
+        )
+        try:
+            response = await complete_agent_response_from_messages_async(config, messages, client=self._model_client)
+        except Exception as exc:
+            LOGGER.exception("agent continuation failed")
+            error_reply = f"Agent 出错：{type(exc).__name__}: {exc}"
+            update_task_run(task.task_id, status=TASK_STATUS_ERROR, assistant_text=error_reply, error=str(exc))
+            self._append_chat_turn(state.prompt_text, error_reply, session_id)
+            return AgentReplyResult(error_reply, session_id, is_error=True)
+
+        return self._finalize_model_response(
+            config,
+            response,
+            prompt_text=state.prompt_text,
+            session_id=session_id,
+            use_conversation_context=state.use_conversation_context,
+            task_id=task.task_id,
+            messages=messages,
+        )
 
     def record_control_plan_waiting(self, user_prompt: str, plan: ControlPlan, session_id: str) -> None:
         append_tool_event(session_id, event="awaiting_user_approval", plan=plan, summary=plan.summary())
         self._append_chat_turn(user_prompt, plan.summary() + "\n\n等待用户确认。", session_id)
 
     def record_control_plan_cancelled(self, plan: ControlPlan, session_id: str) -> str:
+        self.discard_pending_agent_state(plan.plan_id)
         reply = f"已取消电脑操作：{plan.title}"
         append_tool_event(session_id, event="control_cancelled", plan=plan, summary=reply)
         self._append_chat_turn(f"取消电脑操作：{plan.title}", reply, session_id)
@@ -215,6 +236,65 @@ class PetConversationService:
         except Exception:
             LOGGER.exception("failed to parse control plan from agent response")
             return None, str(response.content or "")
+
+    def _finalize_model_response(
+        self,
+        config: AgentConfig,
+        response: ModelResponse,
+        *,
+        prompt_text: str,
+        session_id: str,
+        use_conversation_context: bool,
+        task_id: str,
+        messages: list[dict[str, object]],
+    ) -> AgentReplyResult:
+        if config.control_enabled:
+            control_plan, assistant_text = self._extract_control_plan(response, config.control_workspace)
+            if control_plan is not None:
+                display_text = assistant_text or control_plan.summary()
+                tool_call = response.tool_calls[0] if response.tool_calls else None
+                if tool_call is not None:
+                    if len(response.tool_calls or []) > 1:
+                        LOGGER.warning("model returned %d tool calls; only the first one is used", len(response.tool_calls or []))
+                    self._pending_agent_loops[control_plan.plan_id] = AgentLoopState(
+                        messages=list(messages),
+                        tool_call=tool_call,
+                        assistant_content=str(response.content or ""),
+                        prompt_text=prompt_text,
+                        use_conversation_context=use_conversation_context,
+                    )
+                append_tool_event(
+                    session_id,
+                    event="agent_requested_control",
+                    plan=control_plan,
+                    task_id=task_id,
+                    summary=control_plan.summary(),
+                )
+                update_task_run(task_id, status=TASK_STATUS_AWAITING_TOOL, assistant_text=display_text)
+                if display_text:
+                    self._append_chat_turn(prompt_text, display_text, session_id)
+                return AgentReplyResult(
+                    display_text,
+                    session_id,
+                    control_plan=control_plan,
+                    control_source_text=control_plan.source_text,
+                    prompt_text=prompt_text,
+                )
+        reply_text = str(response.content or "").strip()
+        if not reply_text:
+            reply_text = self._fallback_reply(prompt_text)
+
+        self._append_chat_turn(prompt_text, reply_text, session_id)
+        self._record_agent_memory_candidates(prompt_text, reply_text, session_id, task_id)
+        if use_conversation_context and getattr(config, "long_term_memory_enabled", False):
+            self._record_user_memory(prompt_text, reply_text, session_id)
+        if use_conversation_context and config.memory_enabled:
+            self._append_legacy_memory(prompt_text, reply_text)
+        update_task_run(task_id, status=TASK_STATUS_DONE, assistant_text=reply_text)
+        return AgentReplyResult(reply_text, session_id)
+
+    def discard_pending_agent_state(self, plan_id: str) -> None:
+        self._pending_agent_loops.pop(str(plan_id or ""), None)
 
     def _fallback_reply(self, prompt: str) -> str:
         return local_agent_reply(str(prompt or ""))

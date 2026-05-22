@@ -5,9 +5,12 @@ from types import SimpleNamespace
 
 from desktop_mentor_app.model_client.agent import (
     CONTROL_AWARENESS_PROMPT,
+    build_assistant_tool_message,
+    build_tool_result_message,
     call_agent,
     call_agent_async,
     complete_agent_response_async,
+    complete_agent_response_from_messages_async,
     normalize_chat_url,
 )
 from desktop_mentor_app.model_client.base import ModelResponse, ToolCall
@@ -145,6 +148,29 @@ class AgentClientTests(unittest.IsolatedAsyncioTestCase):
         call = client.calls[0]
         self.assertIsNotNone(call["tools"])
         self.assertEqual(call["tool_choice"], "auto")
+
+    async def test_complete_agent_response_from_messages_preserves_tool_result_messages(self) -> None:
+        config = agent_config(api_url="http://model.test/v1", control_enabled=True)
+        client = FakeModelClient(content="继续处理")
+        tool_call = ToolCall("tool-1", "read_file", {"path": "README.md"}, '{"path":"README.md"}')
+        messages = [
+            {"role": "system", "content": "system"},
+            {"role": "user", "content": "请读 README"},
+            build_assistant_tool_message(tool_call, "先读文件。"),
+            build_tool_result_message(tool_call, "README content"),
+        ]
+
+        response = await complete_agent_response_from_messages_async(config, messages, client=client)
+
+        self.assertEqual(response.content, "继续处理")
+        self.assertEqual(len(client.calls), 1)
+        sent_messages = client.calls[0]["messages"]
+        assert isinstance(sent_messages, list)
+        self.assertEqual(sent_messages[-2]["role"], "assistant")
+        self.assertEqual(sent_messages[-2]["tool_calls"][0]["id"], "tool-1")
+        self.assertEqual(sent_messages[-1]["role"], "tool")
+        self.assertEqual(sent_messages[-1]["tool_call_id"], "tool-1")
+        self.assertEqual(sent_messages[-1]["content"], "README content")
 
     async def test_call_agent_async_without_url_uses_local_fallback(self) -> None:
         client = FakeModelClient(content="should not be used")
