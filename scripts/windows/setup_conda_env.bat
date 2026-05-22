@@ -4,7 +4,8 @@ set "ROOT=%~dp0..\.."
 cd /d "%ROOT%"
 
 set "ENV_PREFIX=%DESKTOP_MENTOR_CONDA_PREFIX%"
-if "%ENV_PREFIX%"=="" set "ENV_PREFIX=%ROOT%\.conda"
+set "ENV_NAME=%DESKTOP_MENTOR_CONDA_ENV_NAME%"
+if "%ENV_PREFIX%"=="" if "%ENV_NAME%"=="" set "ENV_NAME=my-desktop-mentor"
 
 set "PYTHON_VERSION=%DESKTOP_MENTOR_PYTHON_VERSION%"
 if "%PYTHON_VERSION%"=="" set "PYTHON_VERSION=3.12"
@@ -24,35 +25,58 @@ if "%CONDA_CMD%"=="" (
   exit /b 1
 )
 
-if not exist "%ENV_PREFIX%\python.exe" (
-  echo Creating Conda environment at:
-  echo   %ENV_PREFIX%
-  "%CONDA_CMD%" create -y -p "%ENV_PREFIX%" "python=%PYTHON_VERSION%" pip
+if not "%ENV_NAME%"=="" (
+  "%CONDA_CMD%" run -n "%ENV_NAME%" python -c "import sys" >nul 2>nul
   if errorlevel 1 (
-    echo Failed to create Conda environment.
-    pause
-    exit /b 1
+    echo Creating Conda environment named:
+    echo   %ENV_NAME%
+    "%CONDA_CMD%" create -y -n "%ENV_NAME%" "python=%PYTHON_VERSION%" pip
+    if errorlevel 1 (
+      echo Failed to create Conda environment.
+      pause
+      exit /b 1
+    )
+  ) else (
+    echo Using existing Conda environment:
+    echo   %ENV_NAME%
   )
 ) else (
-  echo Using existing Conda environment:
-  echo   %ENV_PREFIX%
+  if not exist "%ENV_PREFIX%\python.exe" (
+    echo Creating Conda environment at:
+    echo   %ENV_PREFIX%
+    "%CONDA_CMD%" create -y -p "%ENV_PREFIX%" "python=%PYTHON_VERSION%" pip
+    if errorlevel 1 (
+      echo Failed to create Conda environment.
+      pause
+      exit /b 1
+    )
+  ) else (
+    echo Using existing Conda environment:
+    echo   %ENV_PREFIX%
+  )
 )
 
-"%ENV_PREFIX%\python.exe" -m pip install --upgrade pip
+if not "%ENV_NAME%"=="" (
+  set "PYTHON_CMD="%CONDA_CMD%" run -n "%ENV_NAME%" python"
+) else (
+  set "PYTHON_CMD="%ENV_PREFIX%\python.exe""
+)
+
+%PYTHON_CMD% -m pip install --upgrade pip
 if errorlevel 1 (
   echo Failed to upgrade pip.
   pause
   exit /b 1
 )
 
-"%ENV_PREFIX%\python.exe" -m pip install -r "%ROOT%\requirements.txt"
+%PYTHON_CMD% -m pip install -r "%ROOT%\requirements.txt"
 if errorlevel 1 (
   echo Failed to install requirements.
   pause
   exit /b 1
 )
 
-"%ENV_PREFIX%\python.exe" -c "from PySide6.QtCore import Qt; from PySide6.QtWebEngineWidgets import QWebEngineView; import markdown_it, latex2mathml, pygments, qasync; print('desktop mentor conda environment is ready')"
+%PYTHON_CMD% -c "from PySide6.QtCore import Qt; from PySide6.QtWebEngineWidgets import QWebEngineView; import markdown_it, latex2mathml, pygments, qasync; print('desktop mentor conda environment is ready')"
 if errorlevel 1 (
   echo Runtime import check failed.
   pause

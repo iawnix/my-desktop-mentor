@@ -10,6 +10,7 @@ from desktop_mentor_app.model_client.base import ModelResponse
 from desktop_mentor_app.pet.chat_manager import PetConversationService
 from desktop_mentor_app.state.agent_store import (
     MEMORY_STATUS_PENDING,
+    TASK_STATUS_AWAITING_TOOL,
     TASK_STATUS_DONE,
     append_tool_event,
     build_agent_state_context,
@@ -20,6 +21,7 @@ from desktop_mentor_app.state.agent_store import (
     start_task_run,
     update_task_run,
 )
+from desktop_mentor_app.model_client.base import ToolCall
 from desktop_mentor_app.tools.types import ControlPlan, ControlResult, PermissionLevel
 
 
@@ -99,17 +101,23 @@ class AgentStoreTests(unittest.TestCase):
 
 
 class FakeModelClient:
+    def __init__(self, *, content: str = "记好了。", tool_calls: list[ToolCall] | None = None) -> None:
+        self.content = content
+        self.tool_calls = tool_calls
+
     async def complete(
         self,
         *,
         url: str,
         api_key: str,
         model: str,
-        messages: list[dict[str, str]],
+        messages: list[dict[str, object]],
         max_tokens: int,
         temperature: float,
+        tools: list[dict[str, object]] | None = None,
+        tool_choice: object | None = None,
     ) -> ModelResponse:
-        return ModelResponse("记好了。")
+        return ModelResponse(self.content, tool_calls=self.tool_calls)
 
 
 class PetConversationServiceAgentStoreTests(unittest.IsolatedAsyncioTestCase):
@@ -136,6 +144,22 @@ class PetConversationServiceAgentStoreTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(result.text, "记好了。")
         self.assertEqual(tasks[0].status, TASK_STATUS_DONE)
         self.assertIn("以后默认先给结论", candidates[0].text)
+
+    async def test_fetch_agent_reply_routes_tool_call_to_control_plan(self) -> None:
+        tool_call = ToolCall("tool-1", "read_file", {"path": "README.md"}, '{"path":"README.md"}')
+        service = PetConversationService(FakeModelClient(content="请先授权。", tool_calls=[tool_call]))
+        config = AgentConfig(api_url="http://model.test/v1", model="mentor-model", control_enabled=True)
+
+        result = await service.fetch_agent_reply(config, "请帮我读 README", use_conversation_context=True)
+
+        tasks = list_recent_task_runs(result.session_id)
+        events = list_recent_tool_events(result.session_id)
+        self.assertIsNotNone(result.control_plan)
+        assert result.control_plan is not None
+        self.assertEqual(result.control_plan.action, "read_file")
+        self.assertTrue(result.text)
+        self.assertEqual(tasks[0].status, TASK_STATUS_AWAITING_TOOL)
+        self.assertEqual(events[0].event, "agent_requested_control")
 
 
 if __name__ == "__main__":

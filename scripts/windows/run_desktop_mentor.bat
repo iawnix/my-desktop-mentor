@@ -10,14 +10,14 @@ set "ENV_NAME=%DESKTOP_MENTOR_CONDA_ENV_NAME%"
 if "%ENV_NAME%"=="" set "ENV_NAME=my-desktop-mentor"
 
 set "ENV_PREFIX=%DESKTOP_MENTOR_CONDA_PREFIX%"
-if "%ENV_PREFIX%"=="" set "ENV_PREFIX=%ROOT%\.conda"
 
 set "PYTHON_CMD="
 call :try_python "%DESKTOP_MENTOR_PYTHON%"
-call :try_python "%ENV_PREFIX%\python.exe"
+if not "%ENV_PREFIX%"=="" call :try_python "%ENV_PREFIX%\python.exe"
 call :try_python "%CONDA_PREFIX%\python.exe"
 call :try_common_conda_envs
 call :try_conda_base_env
+call :try_python "%ROOT%\.conda\python.exe"
 
 if "%PYTHON_CMD%"=="" (
   where py >nul 2>nul

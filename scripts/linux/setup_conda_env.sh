@@ -5,7 +5,8 @@ SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 ROOT_DIR="$(cd "$SCRIPT_DIR/../.." && pwd)"
 cd "$ROOT_DIR"
 
-ENV_PREFIX="${DESKTOP_MENTOR_CONDA_PREFIX:-$ROOT_DIR/.conda}"
+ENV_PREFIX="${DESKTOP_MENTOR_CONDA_PREFIX:-}"
+ENV_NAME="${DESKTOP_MENTOR_CONDA_ENV_NAME:-}"
 PYTHON_VERSION="${DESKTOP_MENTOR_PYTHON_VERSION:-3.12}"
 
 log() {
@@ -40,20 +41,39 @@ if [[ -z "$CONDA_EXE_PATH" ]]; then
   die "Conda was not found. Install Miniconda/Anaconda or set CONDA_EXE=/path/to/conda."
 fi
 
-if [[ ! -x "$ENV_PREFIX/bin/python" ]]; then
-  log "creating Conda environment at $ENV_PREFIX"
-  "$CONDA_EXE_PATH" create -y -p "$ENV_PREFIX" "python=$PYTHON_VERSION" pip
-else
-  log "using existing Conda environment at $ENV_PREFIX"
+if [[ -z "$ENV_PREFIX" && -z "$ENV_NAME" ]]; then
+  ENV_NAME="my-desktop-mentor"
 fi
 
-PYTHON_BIN="$ENV_PREFIX/bin/python"
+if [[ -n "$ENV_NAME" ]]; then
+  if "$CONDA_EXE_PATH" run -n "$ENV_NAME" python -c 'import sys' >/dev/null 2>&1; then
+    log "using existing Conda environment named $ENV_NAME"
+  else
+    log "creating Conda environment named $ENV_NAME"
+    "$CONDA_EXE_PATH" create -y -n "$ENV_NAME" "python=$PYTHON_VERSION" pip
+  fi
+else
+  if [[ ! -x "$ENV_PREFIX/bin/python" ]]; then
+    log "creating Conda environment at $ENV_PREFIX"
+    "$CONDA_EXE_PATH" create -y -p "$ENV_PREFIX" "python=$PYTHON_VERSION" pip
+  else
+    log "using existing Conda environment at $ENV_PREFIX"
+  fi
+fi
+
 log "installing Python requirements"
-"$PYTHON_BIN" -m pip install --upgrade pip
-"$PYTHON_BIN" -m pip install -r "$ROOT_DIR/requirements.txt"
+if [[ -n "$ENV_NAME" ]]; then
+  "$CONDA_EXE_PATH" run -n "$ENV_NAME" python -m pip install --upgrade pip
+  "$CONDA_EXE_PATH" run -n "$ENV_NAME" python -m pip install -r "$ROOT_DIR/requirements.txt"
+else
+  PYTHON_BIN="$ENV_PREFIX/bin/python"
+  "$PYTHON_BIN" -m pip install --upgrade pip
+  "$PYTHON_BIN" -m pip install -r "$ROOT_DIR/requirements.txt"
+fi
 
 log "verifying runtime imports"
-"$PYTHON_BIN" - <<'PY'
+if [[ -n "$ENV_NAME" ]]; then
+  "$CONDA_EXE_PATH" run -n "$ENV_NAME" python - <<'PY'
 from PySide6.QtCore import Qt
 from PySide6.QtWebEngineWidgets import QWebEngineView
 import latex2mathml
@@ -63,5 +83,17 @@ import qasync
 
 print("desktop mentor conda environment is ready")
 PY
+else
+  "$PYTHON_BIN" - <<'PY'
+from PySide6.QtCore import Qt
+from PySide6.QtWebEngineWidgets import QWebEngineView
+import latex2mathml
+import markdown_it
+import pygments
+import qasync
+
+print("desktop mentor conda environment is ready")
+PY
+fi
 
 log "done"

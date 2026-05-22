@@ -3,8 +3,14 @@ from __future__ import annotations
 import unittest
 from types import SimpleNamespace
 
-from desktop_mentor_app.model_client.agent import call_agent, call_agent_async, normalize_chat_url
-from desktop_mentor_app.model_client.base import ModelResponse
+from desktop_mentor_app.model_client.agent import (
+    CONTROL_AWARENESS_PROMPT,
+    call_agent,
+    call_agent_async,
+    complete_agent_response_async,
+    normalize_chat_url,
+)
+from desktop_mentor_app.model_client.base import ModelResponse, ToolCall
 from desktop_mentor_app.constants.model import DEFAULT_MODEL, DEFAULT_PERSONALITY_PROMPT
 
 
@@ -22,8 +28,15 @@ def agent_config(**overrides: object) -> SimpleNamespace:
 
 
 class FakeModelClient:
-    def __init__(self, *, content: str = "ok", fail: Exception | None = None) -> None:
+    def __init__(
+        self,
+        *,
+        content: str = "ok",
+        tool_calls: list[ToolCall] | None = None,
+        fail: Exception | None = None,
+    ) -> None:
         self.content = content
+        self.tool_calls = tool_calls
         self.fail = fail
         self.calls: list[dict[str, object]] = []
 
@@ -33,9 +46,11 @@ class FakeModelClient:
         url: str,
         api_key: str,
         model: str,
-        messages: list[dict[str, str]],
+        messages: list[dict[str, object]],
         max_tokens: int,
         temperature: float,
+        tools: list[dict[str, object]] | None = None,
+        tool_choice: object | None = None,
     ) -> ModelResponse:
         self.calls.append(
             {
@@ -45,11 +60,13 @@ class FakeModelClient:
                 "messages": messages,
                 "max_tokens": max_tokens,
                 "temperature": temperature,
+                "tools": tools,
+                "tool_choice": tool_choice,
             }
         )
         if self.fail is not None:
             raise self.fail
-        return ModelResponse(self.content)
+        return ModelResponse(self.content, tool_calls=self.tool_calls)
 
     def complete_sync(
         self,
@@ -57,9 +74,11 @@ class FakeModelClient:
         url: str,
         api_key: str,
         model: str,
-        messages: list[dict[str, str]],
+        messages: list[dict[str, object]],
         max_tokens: int,
         temperature: float,
+        tools: list[dict[str, object]] | None = None,
+        tool_choice: object | None = None,
     ) -> ModelResponse:
         self.calls.append(
             {
@@ -69,11 +88,13 @@ class FakeModelClient:
                 "messages": messages,
                 "max_tokens": max_tokens,
                 "temperature": temperature,
+                "tools": tools,
+                "tool_choice": tool_choice,
             }
         )
         if self.fail is not None:
             raise self.fail
-        return ModelResponse(self.content)
+        return ModelResponse(self.content, tool_calls=self.tool_calls)
 
 
 class AgentClientTests(unittest.IsolatedAsyncioTestCase):
@@ -85,6 +106,10 @@ class AgentClientTests(unittest.IsolatedAsyncioTestCase):
             "http://localhost:8000/v1/chat/completions",
         )
         self.assertEqual(normalize_chat_url("http://localhost:8000"), "http://localhost:8000/v1/chat/completions")
+
+    def test_control_awareness_prompt_uses_tool_calls(self) -> None:
+        self.assertNotIn("CONTROL_REQUEST", CONTROL_AWARENESS_PROMPT)
+        self.assertIn("工具调用", CONTROL_AWARENESS_PROMPT)
 
     async def test_call_agent_async_accepts_injected_model_client(self) -> None:
         config = agent_config(api_url="http://model.test/v1", api_key="token", model="mentor-model")
@@ -101,6 +126,25 @@ class AgentClientTests(unittest.IsolatedAsyncioTestCase):
         messages = call["messages"]
         assert isinstance(messages, list)
         self.assertEqual(messages[-1], {"role": "user", "content": "hello"})
+        self.assertIsNone(call["tools"])
+        self.assertIsNone(call["tool_choice"])
+
+    async def test_complete_agent_response_async_passes_tools_when_control_enabled(self) -> None:
+        config = agent_config(api_url="http://model.test/v1", control_enabled=True)
+        client = FakeModelClient(
+            content="先读文件",
+            tool_calls=[ToolCall("tool-1", "read_file", {"path": "README.md"}, '{"path":"README.md"}')],
+        )
+
+        response = await complete_agent_response_async(config, "请帮我读 README", client=client)
+
+        self.assertEqual(response.content, "先读文件")
+        self.assertIsNotNone(response.tool_calls)
+        self.assertEqual(response.tool_calls[0].name, "read_file")
+        self.assertEqual(len(client.calls), 1)
+        call = client.calls[0]
+        self.assertIsNotNone(call["tools"])
+        self.assertEqual(call["tool_choice"], "auto")
 
     async def test_call_agent_async_without_url_uses_local_fallback(self) -> None:
         client = FakeModelClient(content="should not be used")

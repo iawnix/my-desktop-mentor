@@ -6,7 +6,9 @@ __all__ = [
     "ControlResult",
     "PermissionLevel",
     "build_control_plan",
-    "build_control_plan_from_agent_reply",
+    "build_control_plan_from_model_response",
+    "build_control_plan_from_tool_call",
+    "build_control_tool_schemas",
     "execute_control_plan",
     "execute_control_plan_async",
 ]
@@ -17,7 +19,12 @@ def __getattr__(name: str):
         from . import types
 
         return getattr(types, name)
-    if name in {"build_control_plan", "build_control_plan_from_agent_reply"}:
+    if name in {
+        "build_control_plan",
+        "build_control_plan_from_model_response",
+        "build_control_plan_from_tool_call",
+        "build_control_tool_schemas",
+    }:
         from . import registry
 
         return getattr(registry, name)

@@ -179,9 +179,11 @@ find_conda_exe() {
 add_conda_python_candidates() {
   local env_name env_prefix conda_exe conda_base env_root
   env_name="${DESKTOP_MENTOR_CONDA_ENV_NAME:-my-desktop-mentor}"
-  env_prefix="${DESKTOP_MENTOR_CONDA_PREFIX:-$ROOT_DIR/.conda}"
+  env_prefix="${DESKTOP_MENTOR_CONDA_PREFIX:-}"
 
-  add_candidate "$env_prefix/bin/python"
+  if [[ -n "$env_prefix" ]]; then
+    add_candidate "$env_prefix/bin/python"
+  fi
   if [[ -n "${CONDA_PREFIX:-}" ]]; then
     add_candidate "$CONDA_PREFIX/bin/python"
   fi
@@ -197,6 +199,8 @@ add_conda_python_candidates() {
   for env_root in "$HOME"/soft/conda/*/envs "$HOME"/miniconda*/envs "$HOME"/anaconda*/envs; do
     add_candidate "$env_root/$env_name/bin/python"
   done
+
+  add_candidate "$ROOT_DIR/.conda/bin/python"
 }
 
 add_standard_python_candidates() {

@@ -4,7 +4,8 @@ import tempfile
 import unittest
 from pathlib import Path
 
-from desktop_mentor_app.tools.registry import build_control_plan, build_control_plan_from_agent_reply
+from desktop_mentor_app.model_client.base import ModelResponse, ToolCall
+from desktop_mentor_app.tools.registry import build_control_plan, build_control_plan_from_model_response
 from desktop_mentor_app.tools.types import PermissionLevel
 
 
@@ -26,19 +27,25 @@ class ControlPlanningTests(unittest.TestCase):
         self.assertTrue(plan.is_blocked)
         self.assertEqual(plan.permission, PermissionLevel.BLOCKED)
 
-    def test_agent_reply_control_request_promotes_read_to_approval(self) -> None:
+    def test_model_response_tool_call_promotes_read_to_approval(self) -> None:
         with tempfile.TemporaryDirectory() as tmpdir:
             target = Path(tmpdir) / "readme.txt"
             target.write_text("ok", encoding="utf-8")
-            plan, cleaned = build_control_plan_from_agent_reply(
-                f"先看这个。\nCONTROL_REQUEST: /read {target}",
-                tmpdir,
+            response = ModelResponse(
+                "先看这个。",
+                tool_calls=[ToolCall("tool-1", "read_file", {"path": str(target)}, f'{{"path":"{target}"}}')],
             )
+            plan, cleaned = build_control_plan_from_model_response(response, tmpdir)
         self.assertIsNotNone(plan)
         assert plan is not None
         self.assertEqual(plan.action, "read_file")
         self.assertEqual(plan.permission, PermissionLevel.USER_APPROVAL)
         self.assertEqual(cleaned, "先看这个。")
+
+    def test_model_response_without_tool_calls_returns_text_only(self) -> None:
+        plan, cleaned = build_control_plan_from_model_response(ModelResponse("只是说明，不调用工具。"), "/tmp")
+        self.assertIsNone(plan)
+        self.assertEqual(cleaned, "只是说明，不调用工具。")
 
 
 if __name__ == "__main__":

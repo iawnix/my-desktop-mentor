@@ -33,9 +33,11 @@ add_candidate() {
 add_conda_python_candidates() {
   local env_name env_prefix conda_exe conda_base env_root
   env_name="${DESKTOP_MENTOR_CONDA_ENV_NAME:-my-desktop-mentor}"
-  env_prefix="${DESKTOP_MENTOR_CONDA_PREFIX:-$ROOT_DIR/.conda}"
+  env_prefix="${DESKTOP_MENTOR_CONDA_PREFIX:-}"
 
-  add_candidate "$env_prefix/bin/python"
+  if [[ -n "$env_prefix" ]]; then
+    add_candidate "$env_prefix/bin/python"
+  fi
   [[ -n "${CONDA_PREFIX:-}" ]] && add_candidate "$CONDA_PREFIX/bin/python"
 
   conda_exe="$(find_conda_exe || true)"
@@ -47,6 +49,8 @@ add_conda_python_candidates() {
   for env_root in "$HOME"/soft/conda/*/envs "$HOME"/miniconda*/envs "$HOME"/anaconda*/envs; do
     add_candidate "$env_root/$env_name/bin/python"
   done
+
+  add_candidate "$ROOT_DIR/.conda/bin/python"
 }
 
 PYTHON_FOR_COMPILE="${DESKTOP_MENTOR_PYTHON:-}"
@@ -251,7 +255,8 @@ from desktop_mentor_app.config.store import AgentConfig, new_default_config
 from desktop_mentor_app.state.conversations import append_chat_turn, build_conversation_memory_context, clear_chat_history, create_conversation_session, load_chat_history, list_conversation_sessions
 from desktop_mentor_app.state.user_memory import add_user_memory, build_user_memory_context, delete_user_memory, load_user_memories
 from desktop_mentor_app.tools.executor import execute_control_plan
-from desktop_mentor_app.tools.registry import build_control_plan, build_control_plan_from_agent_reply, desktop_path
+from desktop_mentor_app.model_client.base import ModelResponse, ToolCall
+from desktop_mentor_app.tools.registry import build_control_plan, build_control_plan_from_model_response, desktop_path
 from desktop_mentor_app.tools.types import PermissionLevel
 from desktop_mentor_app.constants.pet import DEFAULT_CLICK_MESSAGE, MAX_IDLE_SECONDS, MAX_PET_SIZE, MIN_PET_SIZE
 from desktop_mentor_app.constants.stickers import DEFAULT_STICKER_ANIMATION_SPEED, MAX_STICKER_ANIMATION_SPEED, STICKER_ACTION_IDLE, STICKER_ACTION_TAP
@@ -482,8 +487,18 @@ for auth_text in (
     assert auth_plan.plan_id in pet.chat_dialog.control_plan_buttons
     assert not pet.chat_dialog.waiting_for_reply
     pet.pending_control_plans.pop(auth_plan.plan_id, None)
-agent_plan, cleaned_reply = build_control_plan_from_agent_reply(
-    "我需要先读取这个文件。\nCONTROL_REQUEST: 读取 D:\\DATA\\Desktop\\Nature_manuscript.txt",
+agent_plan, cleaned_reply = build_control_plan_from_model_response(
+    ModelResponse(
+        "我需要先读取这个文件。",
+        tool_calls=[
+            ToolCall(
+                "tool-1",
+                "read_file",
+                {"path": r"D:\DATA\Desktop\Nature_manuscript.txt"},
+                '{"path":"D:\\\\DATA\\\\Desktop\\\\Nature_manuscript.txt"}',
+            )
+        ],
+    ),
     str(ROOT),
 )
 assert agent_plan is not None and agent_plan.requires_confirmation, agent_plan
@@ -493,13 +508,16 @@ pet.show_agent_control_request(agent_plan, cleaned_reply, "帮我看 Nature 文�
 assert agent_plan.plan_id in pet.pending_control_plans
 assert agent_plan.plan_id in pet.chat_dialog.control_plan_buttons
 pet.pending_control_plans.pop(agent_plan.plan_id, None)
-hint_plan, hint_cleaned_reply = build_control_plan_from_agent_reply(
-    "我会通过内置电脑控制去读它：D:\\DATA\\Desktop\\Nature_manuscript.txt",
+hint_plan, hint_cleaned_reply = build_control_plan_from_model_response(
+    ModelResponse(
+        "我会通过工具调用去读它。",
+        tool_calls=[ToolCall("tool-2", "read_file", {"path": r"D:\DATA\Desktop\Nature_manuscript.txt"})],
+    ),
     str(ROOT),
 )
 assert hint_plan is not None and hint_plan.requires_confirmation, hint_plan
 assert hint_plan.action == "read_file", hint_plan
-assert hint_cleaned_reply.startswith("我会通过内置电脑控制"), hint_cleaned_reply
+assert hint_cleaned_reply.startswith("我会通过工具调用"), hint_cleaned_reply
 pet.chat_dialog = None
 assert len(history) == 2, history
 assert len(history_chat.message_widgets) == 2, len(history_chat.message_widgets)

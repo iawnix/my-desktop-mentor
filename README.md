@@ -21,7 +21,7 @@ PySide6 桌面导师 / 桌宠应用。它以透明置顶贴纸停留在桌面上
 - Python 3.11+（推荐由 Conda 环境提供）
 - PySide6 6.5+
 
-Linux 推荐直接运行用户级安装脚本。它会创建项目本地 Conda 环境、安装依赖，并把实际路径的桌面启动器写入 `~/.local/share/applications/`，这样 rofi 可以直接启动。
+Linux 推荐直接运行用户级安装脚本。它默认创建/使用名为 `my-desktop-mentor` 的 Conda 环境、安装依赖，并把实际路径的桌面启动器写入 `~/.local/share/applications/`，这样 rofi 可以直接启动。
 
 ```bash
 bash install_linux.sh
@@ -37,8 +37,8 @@ Linux 安装脚本常用选项：
 
 ```bash
 bash install_linux.sh --conda /path/to/conda
-bash install_linux.sh --env-prefix "$PWD/.conda"
 bash install_linux.sh --env-name my-desktop-mentor
+bash install_linux.sh --env-prefix "$PWD/.conda"
 bash install_linux.sh --python-version 3.12
 bash install_linux.sh --input-method auto
 bash install_linux.sh --qt-platform auto
@@ -51,14 +51,13 @@ bash install_linux.sh --dry-run
 - 输入法：`auto`、`fcitx`、`ibus`、`none`
 - Qt 平台：`auto`、`xcb`、`wayland`、`none`
 - Conda：可用 `--conda /path/to/conda` 指定用户自己的 Conda 可执行文件
-- 环境：可用 `--env-prefix /path/to/env` 创建路径环境，或 `--env-name name` 创建命名环境
+- 环境：默认使用命名环境 `my-desktop-mentor`；可用 `--env-name name` 指定其他命名环境，或用 `--env-prefix /path/to/env` 显式改为路径环境
 
-例如用户已经安装了 Miniconda，想创建命名环境并适配 Wayland + IBus：
+例如用户已经安装了 Miniconda，想创建默认命名环境并适配 Wayland + IBus：
 
 ```bash
 bash install_linux.sh \
   --conda "$HOME/miniconda3/bin/conda" \
-  --env-name my-desktop-mentor \
   --input-method ibus \
   --qt-platform wayland
 ```
@@ -74,15 +73,16 @@ bash install_linux.sh \
 ```bash
 conda create -n my-desktop-mentor python=3.12 pip
 conda run -n my-desktop-mentor python -m pip install -r requirements.txt
+conda activate my-desktop-mentor
 ```
 
 启动脚本会按顺序查找：
 
 - `DESKTOP_MENTOR_PYTHON` 指定的解释器
-- `DESKTOP_MENTOR_CONDA_PREFIX` 指定的环境
-- 项目本地 `.conda/`
+- `DESKTOP_MENTOR_CONDA_PREFIX` 显式指定的路径环境
 - 当前已激活的 `CONDA_PREFIX`
 - `DESKTOP_MENTOR_CONDA_ENV_NAME` 指定的命名环境（默认 `my-desktop-mentor`）
+- 旧版本遗留的项目本地 `.conda/`
 - `.venv/` 和系统 Python 作为兜底
 
 ## Linux 使用
@@ -177,7 +177,7 @@ scripts\windows\run_desktop_mentor.bat
 scripts\windows\run_desktop_mentor_quiet.vbs
 ```
 
-Windows 启动脚本同样优先使用项目本地 `.conda\python.exe`。如需指定已有环境：
+Windows 启动脚本同样默认使用命名环境 `my-desktop-mentor`。如需指定路径环境：
 
 ```bat
 set DESKTOP_MENTOR_CONDA_PREFIX=C:\Users\you\miniconda3\envs\my-desktop-mentor
@@ -311,13 +311,7 @@ logs/app.log
 请在桌面创建一个文件 mentor-note.txt，内容是 hello
 ```
 
-agent 回复中如果包含：
-
-```text
-CONTROL_REQUEST: 读取 D:\DATA\Desktop\Nature_manuscript.txt
-```
-
-也会生成同一套授权卡。点击 `允许本次` 后才会执行；点击 `拒绝` 不会动手。
+模型通过工具调用请求电脑操作时，也会生成同一套授权卡。点击 `允许本次` 后才会执行；点击 `拒绝` 不会动手。
 
 安全边界：
 

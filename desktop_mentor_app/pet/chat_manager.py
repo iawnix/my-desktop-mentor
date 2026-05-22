@@ -6,8 +6,8 @@ from dataclasses import dataclass
 
 from ..agent.context import assemble_agent_prompt
 from ..config.store import AgentConfig
-from ..model_client.agent import call_agent_async
-from ..model_client.base import ModelClient
+from ..model_client.agent import complete_agent_response_async, local_agent_reply
+from ..model_client.base import ModelClient, ModelResponse
 from ..state.conversations import (
     append_chat_turn,
     create_conversation_session,
@@ -27,7 +27,7 @@ from ..state.agent_store import (
 from ..state.memory import append_memory_turn
 from ..state.user_memory import record_user_memory_turn
 from ..tools.executor import execute_control_plan_async
-from ..tools.registry import build_control_plan_from_agent_reply
+from ..tools.registry import build_control_plan_from_model_response
 from ..tools.types import ControlPlan
 
 LOGGER = logging.getLogger(__name__)
@@ -83,7 +83,7 @@ class PetConversationService:
             use_context=use_conversation_context,
         )
         try:
-            reply = await call_agent_async(
+            response = await complete_agent_response_async(
                 config,
                 agent_prompt,
                 include_legacy_memory=bool(use_conversation_context and config.memory_enabled),
@@ -91,14 +91,15 @@ class PetConversationService:
             )
         except Exception as exc:
             LOGGER.exception("agent reply failed")
-            reply = f"Agent 出错：{type(exc).__name__}: {exc}"
-            update_task_run(task.task_id, status=TASK_STATUS_ERROR, assistant_text=reply, error=str(exc))
-            self._append_chat_turn(memory_prompt or prompt, reply, session.session_id)
-            return AgentReplyResult(reply, session.session_id, is_error=True)
+            error_reply = f"Agent 出错：{type(exc).__name__}: {exc}"
+            update_task_run(task.task_id, status=TASK_STATUS_ERROR, assistant_text=error_reply, error=str(exc))
+            self._append_chat_turn(memory_prompt or prompt, error_reply, session.session_id)
+            return AgentReplyResult(error_reply, session.session_id, is_error=True)
 
         if config.control_enabled:
-            control_plan, cleaned_reply = self._extract_control_plan(reply, config.control_workspace)
+            control_plan, assistant_text = self._extract_control_plan(response, config.control_workspace)
             if control_plan is not None:
+                display_text = assistant_text or control_plan.summary()
                 append_tool_event(
                     session.session_id,
                     event="agent_requested_control",
@@ -106,24 +107,27 @@ class PetConversationService:
                     task_id=task.task_id,
                     summary=control_plan.summary(),
                 )
-                update_task_run(task.task_id, status=TASK_STATUS_AWAITING_TOOL, assistant_text=cleaned_reply)
-                if cleaned_reply:
-                    self._append_chat_turn(memory_prompt or prompt, cleaned_reply, session.session_id)
+                update_task_run(task.task_id, status=TASK_STATUS_AWAITING_TOOL, assistant_text=display_text)
+                if display_text:
+                    self._append_chat_turn(memory_prompt or prompt, display_text, session.session_id)
                 return AgentReplyResult(
-                    cleaned_reply,
+                    display_text,
                     session.session_id,
                     control_plan=control_plan,
                     control_source_text=control_plan.source_text,
                 )
+        reply_text = str(response.content or "").strip()
+        if not reply_text:
+            reply_text = self._fallback_reply(memory_prompt or prompt)
 
-        self._append_chat_turn(memory_prompt or prompt, reply, session.session_id)
-        self._record_agent_memory_candidates(memory_prompt or prompt, reply, session.session_id, task.task_id)
+        self._append_chat_turn(memory_prompt or prompt, reply_text, session.session_id)
+        self._record_agent_memory_candidates(memory_prompt or prompt, reply_text, session.session_id, task.task_id)
         if use_conversation_context and getattr(config, "long_term_memory_enabled", False):
-            self._record_user_memory(memory_prompt or prompt, reply, session.session_id)
+            self._record_user_memory(memory_prompt or prompt, reply_text, session.session_id)
         if use_conversation_context and config.memory_enabled:
-            self._append_legacy_memory(memory_prompt or prompt, reply)
-        update_task_run(task.task_id, status=TASK_STATUS_DONE, assistant_text=reply)
-        return AgentReplyResult(reply, session.session_id)
+            self._append_legacy_memory(memory_prompt or prompt, reply_text)
+        update_task_run(task.task_id, status=TASK_STATUS_DONE, assistant_text=reply_text)
+        return AgentReplyResult(reply_text, session.session_id)
 
     async def execute_control_plan_reply(
         self,
@@ -188,12 +192,15 @@ class PetConversationService:
             use_conversation_context=use_conversation_context,
         )
 
-    def _extract_control_plan(self, reply: str, workspace: str) -> tuple[ControlPlan | None, str]:
+    def _extract_control_plan(self, response: ModelResponse, workspace: str) -> tuple[ControlPlan | None, str]:
         try:
-            return build_control_plan_from_agent_reply(reply, workspace)
+            return build_control_plan_from_model_response(response, workspace)
         except Exception:
-            LOGGER.exception("failed to parse control plan from agent reply")
-            return None, reply
+            LOGGER.exception("failed to parse control plan from agent response")
+            return None, str(response.content or "")
+
+    def _fallback_reply(self, prompt: str) -> str:
+        return local_agent_reply(str(prompt or ""))
 
     def _append_chat_turn(self, prompt: str, reply: str, session_id: str) -> None:
         try:

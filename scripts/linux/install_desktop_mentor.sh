@@ -25,8 +25,8 @@ Install My Desktop Mentor for the current Linux user.
 
 Options:
   --conda PATH            Conda executable to use for environment creation
-  --env-prefix PATH       Conda environment path. Default: .conda under the project root
-  --env-name NAME         Named Conda environment to create/use instead of --env-prefix
+  --env-prefix PATH       Conda environment path. Opt into a path env instead of a named env
+  --env-name NAME         Named Conda environment to create/use. Default: my-desktop-mentor
   --python-version VER    Python version for a new Conda env. Default: 3.12
   --app-id NAME           Desktop file id/name. Default: desktop_mentor
   --applications-dir DIR  Desktop file install dir. Default: $XDG_DATA_HOME/applications or ~/.local/share/applications
@@ -109,7 +109,7 @@ while [[ $# -gt 0 ]]; do
 done
 
 if [[ -z "$ENV_PREFIX" && -z "$ENV_NAME" ]]; then
-  ENV_PREFIX="$ROOT_DIR/.conda"
+  ENV_NAME="my-desktop-mentor"
 fi
 
 if [[ -z "$PYTHON_VERSION" || -z "$APP_ID" || -z "$APPLICATIONS_DIR" ]]; then

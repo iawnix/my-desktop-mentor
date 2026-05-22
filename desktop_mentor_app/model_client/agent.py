@@ -8,6 +8,7 @@ from typing import TYPE_CHECKING
 
 from ..constants.model import DEFAULT_MODEL, DEFAULT_PERSONALITY_PROMPT, MAX_AGENT_REPLY_CHARS, MAX_AGENT_REPLY_TOKENS
 from ..constants.pet import DEFAULT_IDLE_MESSAGE
+from ..tools.registry import build_control_tool_schemas
 from .base import ModelClient, SyncModelClient
 from .openai_compatible import OpenAICompatibleModelClient
 
@@ -18,10 +19,10 @@ LOGGER = logging.getLogger(__name__)
 
 CONTROL_AWARENESS_PROMPT = """运行边界：
 - 这个桌宠内置受控电脑操作层，可读取文件、列目录、搜索文本，并在写入/打开/运行前弹出确认卡。
+- 当系统提供工具调用时，优先使用工具调用，不要在正文里伪造命令字符串。
 - 用户要求读取、查看、分析桌面或本机文件时，不要让用户手动运行 type/cat/powershell 等系统命令再复制输出。
-- 当你需要电脑操作时，在回复中单独输出一行 `CONTROL_REQUEST: <要执行的动作和目标>`，不要声称已经完成操作。
-- 读取用户本机文件前应通过内置电脑控制确认卡让用户选择；如果没有弹出工具结果，再提示用户检查设置里的 Computer control。
-- 不要声称已经读取没有实际读取的文件内容。"""
+- 需要本机操作时，直接调用对应工具；多步骤任务要拆成多次工具调用，先读再写再运行。
+- 不要声称已经读取、写入或运行没有实际执行的电脑操作。"""
 
 
 def normalize_chat_url(raw_url: str) -> str:
@@ -120,7 +121,7 @@ def build_agent_messages(
     user_text: str,
     *,
     include_legacy_memory: bool | None = None,
-) -> list[dict[str, str]]:
+) -> list[dict[str, object]]:
     messages = [
         {"role": "system", "content": agent_system_prompt(config)},
     ]
@@ -131,17 +132,33 @@ def build_agent_messages(
     return messages
 
 
-async def call_agent_async(
+def _build_agent_tools(config: AgentConfig, tools: list[dict[str, object]] | None) -> list[dict[str, object]] | None:
+    if tools is not None:
+        return tools
+    if getattr(config, "control_enabled", False):
+        return build_control_tool_schemas()
+    return None
+
+
+async def complete_agent_response_async(
     config: AgentConfig,
     user_text: str,
     *,
     include_legacy_memory: bool | None = None,
     client: ModelClient | None = None,
-) -> str:
+    tools: list[dict[str, object]] | None = None,
+    tool_choice: object | None = None,
+) -> "ModelResponse":
+    from .base import ModelResponse
+
     url = normalize_chat_url(config.api_url)
     if not url:
-        return local_agent_reply(user_text)
+        return ModelResponse(local_agent_reply(user_text))
     model_client = client or OpenAICompatibleModelClient()
+    request_tools = _build_agent_tools(config, tools)
+    request_tool_choice = tool_choice
+    if request_tools is not None and request_tool_choice is None:
+        request_tool_choice = "auto"
     try:
         response = await model_client.complete(
             url=url,
@@ -150,24 +167,71 @@ async def call_agent_async(
             messages=build_agent_messages(config, user_text, include_legacy_memory=include_legacy_memory),
             max_tokens=MAX_AGENT_REPLY_TOKENS,
             temperature=0.8,
+            tools=request_tools,
+            tool_choice=request_tool_choice,
         )
+        return response
     except Exception as exc:
+        if request_tools is not None:
+            LOGGER.warning("agent request with tools failed, retrying without tools: %s", exc)
+            try:
+                response = await model_client.complete(
+                    url=url,
+                    api_key=config.api_key,
+                    model=config.model or DEFAULT_MODEL,
+                    messages=build_agent_messages(config, user_text, include_legacy_memory=include_legacy_memory),
+                    max_tokens=MAX_AGENT_REPLY_TOKENS,
+                    temperature=0.8,
+                )
+                return response
+            except Exception as retry_exc:
+                exc = retry_exc
         LOGGER.warning("agent request failed: %s", exc)
-        return f"接口没接上。我先给本地建议：把目标、材料和卡点列出来。{type(exc).__name__}"
-    return limit_formatted_text(str(response.content or local_agent_reply(user_text)), MAX_AGENT_REPLY_CHARS)
+        return ModelResponse(f"接口没接上。我先给本地建议：把目标、材料和卡点列出来。{type(exc).__name__}")
 
 
-def call_agent(
+async def call_agent_async(
+    config: AgentConfig,
+    user_text: str,
+    *,
+    include_legacy_memory: bool | None = None,
+    client: ModelClient | None = None,
+    tools: list[dict[str, object]] | None = None,
+    tool_choice: object | None = None,
+) -> str:
+    response = await complete_agent_response_async(
+        config,
+        user_text,
+        include_legacy_memory=include_legacy_memory,
+        client=client,
+        tools=tools,
+        tool_choice=tool_choice,
+    )
+    text = str(response.content or "")
+    if response.tool_calls:
+        return limit_formatted_text(text or local_agent_reply(user_text), MAX_AGENT_REPLY_CHARS)
+    return limit_formatted_text(text or local_agent_reply(user_text), MAX_AGENT_REPLY_CHARS)
+
+
+def complete_agent_response(
     config: AgentConfig,
     user_text: str,
     *,
     include_legacy_memory: bool | None = None,
     client: SyncModelClient | None = None,
-) -> str:
+    tools: list[dict[str, object]] | None = None,
+    tool_choice: object | None = None,
+) -> "ModelResponse":
+    from .base import ModelResponse
+
     url = normalize_chat_url(config.api_url)
     if not url:
-        return local_agent_reply(user_text)
+        return ModelResponse(local_agent_reply(user_text))
     model_client = client or OpenAICompatibleModelClient()
+    request_tools = _build_agent_tools(config, tools)
+    request_tool_choice = tool_choice
+    if request_tools is not None and request_tool_choice is None:
+        request_tool_choice = "auto"
     try:
         response = model_client.complete_sync(
             url=url,
@@ -176,8 +240,47 @@ def call_agent(
             messages=build_agent_messages(config, user_text, include_legacy_memory=include_legacy_memory),
             max_tokens=MAX_AGENT_REPLY_TOKENS,
             temperature=0.8,
+            tools=request_tools,
+            tool_choice=request_tool_choice,
         )
+        return response
     except Exception as exc:
+        if request_tools is not None:
+            LOGGER.warning("agent request with tools failed, retrying without tools: %s", exc)
+            try:
+                response = model_client.complete_sync(
+                    url=url,
+                    api_key=config.api_key,
+                    model=config.model or DEFAULT_MODEL,
+                    messages=build_agent_messages(config, user_text, include_legacy_memory=include_legacy_memory),
+                    max_tokens=MAX_AGENT_REPLY_TOKENS,
+                    temperature=0.8,
+                )
+                return response
+            except Exception as retry_exc:
+                exc = retry_exc
         LOGGER.warning("agent request failed: %s", exc)
-        return f"接口没接上。我先给本地建议：把目标、材料和卡点列出来。{type(exc).__name__}"
-    return limit_formatted_text(str(response.content or local_agent_reply(user_text)), MAX_AGENT_REPLY_CHARS)
+        return ModelResponse(f"接口没接上。我先给本地建议：把目标、材料和卡点列出来。{type(exc).__name__}")
+
+
+def call_agent(
+    config: AgentConfig,
+    user_text: str,
+    *,
+    include_legacy_memory: bool | None = None,
+    client: SyncModelClient | None = None,
+    tools: list[dict[str, object]] | None = None,
+    tool_choice: object | None = None,
+) -> str:
+    response = complete_agent_response(
+        config,
+        user_text,
+        include_legacy_memory=include_legacy_memory,
+        client=client,
+        tools=tools,
+        tool_choice=tool_choice,
+    )
+    text = str(response.content or "")
+    if response.tool_calls:
+        return limit_formatted_text(text or local_agent_reply(user_text), MAX_AGENT_REPLY_CHARS)
+    return limit_formatted_text(text or local_agent_reply(user_text), MAX_AGENT_REPLY_CHARS)
