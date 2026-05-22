@@ -200,10 +200,12 @@ PYTHONPATH="$ROOT_DIR" "$PYTHON_FOR_QT" -m unittest discover -s tests
 
 step "Linux launcher syntax"
 bash -n install_linux.sh
+bash -n uninstall_linux.sh
 bash -n scripts/linux/install_desktop_mentor.sh
 bash -n scripts/linux/run_desktop_mentor.sh
 bash -n scripts/linux/self_test.sh
 bash -n scripts/linux/setup_conda_env.sh
+bash -n scripts/linux/uninstall_desktop_mentor.sh
 
 step "Linux desktop file"
 if command -v desktop-file-validate >/dev/null 2>&1; then

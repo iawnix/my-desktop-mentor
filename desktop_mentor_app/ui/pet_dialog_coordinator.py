@@ -198,6 +198,7 @@ class PetDialogCoordinator:
     def open_memory_manager(self) -> None:
         pet = self.pet
         pet.mark_interaction()
+        pet.show_bubble("打开长期记忆。", duration=min(1.8, pet.message_duration()), action=STICKER_ACTION_TAP)
         if self.memory_dialog is not None and self.memory_dialog.isVisible():
             self.memory_dialog.raise_()
             self.memory_dialog.activate_for_input()
