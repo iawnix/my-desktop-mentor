@@ -7,6 +7,7 @@ from typing import TYPE_CHECKING
 from ..state.agent_store import build_agent_state_context
 from ..state.conversations import build_conversation_memory_context
 from ..state.user_memory import build_user_memory_context
+from .skills import build_skill_context
 
 if TYPE_CHECKING:
     from ..config.store import AgentConfig
@@ -26,6 +27,13 @@ def assemble_agent_prompt(
         return prompt
 
     parts: list[str] = []
+    try:
+        skill_context = build_skill_context(config, prompt)
+        if skill_context:
+            parts.append(skill_context)
+    except Exception:
+        LOGGER.exception("failed to build skill context")
+
     try:
         user_memory_context = (
             build_user_memory_context(

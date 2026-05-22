@@ -825,8 +825,14 @@ class DesktopMentorPet(QWidget):
     ) -> None:
         self.dialog_coordinator.handle_chat_message(user_prompt, use_drop_context, session_id, use_conversation_context)
 
-    def handle_control_plan(self, plan: ControlPlan, user_prompt: str, session_id: str) -> None:
-        self.dialog_coordinator.handle_control_plan(plan, user_prompt, session_id)
+    def handle_control_plan(
+        self,
+        plan: ControlPlan,
+        user_prompt: str,
+        session_id: str,
+        use_conversation_context: bool = True,
+    ) -> None:
+        self.dialog_coordinator.handle_control_plan(plan, user_prompt, session_id, use_conversation_context)
 
     def request_control_authorization(
         self,

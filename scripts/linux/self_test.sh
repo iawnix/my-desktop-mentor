@@ -130,6 +130,9 @@ step "Python syntax"
   desktop_mentor_app/config/__init__.py \
   desktop_mentor_app/config/migration.py \
   desktop_mentor_app/config/store.py \
+  desktop_mentor_app/agent/__init__.py \
+  desktop_mentor_app/agent/context.py \
+  desktop_mentor_app/agent/skills.py \
   desktop_mentor_app/core/__init__.py \
   desktop_mentor_app/core/assets.py \
   desktop_mentor_app/core/logging.py \

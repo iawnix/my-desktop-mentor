@@ -9,6 +9,7 @@ default_image = root / "assets" / "cow.png"
 default_icon = root / "assets" / "desktop_mentor.ico"
 todo_badge = root / "assets" / "todo_badge.png"
 default_stickers = root / "assets" / "stickers"
+builtin_skills = root / "desktop_mentor_app" / "skills"
 
 if not default_icon.exists() or default_icon.stat().st_mtime < default_image.stat().st_mtime:
     subprocess.run([sys.executable, str(root / "desktop_mentor.py"), "--ensure-default-icon"], check=True)
@@ -22,6 +23,7 @@ a = Analysis(
         (str(default_icon), "assets"),
         (str(todo_badge), "assets"),
         (str(default_stickers), "assets/stickers"),
+        (str(builtin_skills), "desktop_mentor_app/skills"),
     ],
     hiddenimports=[
         "PySide6.QtWebEngineWidgets",

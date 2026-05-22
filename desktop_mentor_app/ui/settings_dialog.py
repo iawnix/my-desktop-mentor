@@ -182,7 +182,8 @@ class SettingsDialog(QDialog):
         self.control_check.setChecked(bool(config.control_enabled if config.control_enabled is not None else DEFAULT_CONTROL_ENABLED))
 
         self.control_workspace_edit = QLineEdit(config.control_workspace or DEFAULT_CONTROL_WORKSPACE or str(Path.home()))
-        self.control_workspace_edit.setPlaceholderText("默认电脑操作工作目录")
+        self.control_workspace_edit.setPlaceholderText("模型/工具默认工作目录")
+        self.control_workspace_edit.setToolTip("这里决定模型工具默认读取、写入和运行命令的目录。")
         control_workspace_button = QPushButton("选择")
         mark_button(control_workspace_button, "miniButton")
         control_workspace_button.clicked.connect(self.browse_control_workspace)
@@ -244,7 +245,7 @@ class SettingsDialog(QDialog):
             section_card("互动", interaction_form),
             section_card("动作贴纸", sticker_layout, "这些素材只写入用户运行时配置，不复制进项目目录。"),
             section_card("上下文", memory_form),
-            section_card("电脑控制", control_form, "读操作直接执行；运行、打开和写入会先请求确认。"),
+            section_card("电脑控制", control_form, "Workspace 是模型工具默认工作目录；读操作直接执行，运行、打开和写入会先请求确认。"),
             section_card("风格提示词", prompt_layout),
         ]
         self.nav_buttons: list[QPushButton] = []

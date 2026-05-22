@@ -26,6 +26,10 @@ class ChatHistoryMessage:
     role: str
     content: str
     ts: int
+    tool_call_id: str = ""
+    tool_name: str = ""
+    tool_result_for: str = ""
+    metadata: dict[str, object] = field(default_factory=dict)
 
 
 @dataclass
@@ -199,13 +203,22 @@ def parse_chat_history_line(line: str) -> ChatHistoryMessage | None:
         return None
     role = str(item.get("role", "")).strip()
     content = str(item.get("content", "")).strip()
-    if role not in {"user", "assistant"} or not content:
+    if role not in {"user", "assistant", "tool"} or not content:
         return None
     try:
         ts = int(item.get("ts", 0))
     except Exception:
         ts = 0
-    return ChatHistoryMessage(role=role, content=compact_history_text(content), ts=ts or int(time.time()))
+    metadata = item.get("metadata")
+    return ChatHistoryMessage(
+        role=role,
+        content=compact_history_text(content),
+        ts=ts or int(time.time()),
+        tool_call_id=compact_inline_text(str(item.get("tool_call_id", "") or ""), 120),
+        tool_name=compact_inline_text(str(item.get("tool_name", "") or item.get("name", "") or ""), 120),
+        tool_result_for=compact_inline_text(str(item.get("tool_result_for", "") or ""), 120),
+        metadata=metadata if isinstance(metadata, dict) else {},
+    )
 
 
 def read_message_file(path: Path) -> list[ChatHistoryMessage]:
@@ -232,17 +245,20 @@ def write_message_file(session_id: str, messages: list[ChatHistoryMessage]) -> P
     retained = messages[-CONVERSATION_MAX_MESSAGES:]
     with path.open("w", encoding="utf-8") as handle:
         for message in retained:
-            handle.write(
-                json.dumps(
-                    {
-                        "ts": int(message.ts),
-                        "role": message.role,
-                        "content": compact_history_text(message.content),
-                    },
-                    ensure_ascii=False,
-                )
-                + "\n"
-            )
+            record: dict[str, object] = {
+                "ts": int(message.ts),
+                "role": message.role,
+                "content": compact_history_text(message.content),
+            }
+            if message.tool_call_id:
+                record["tool_call_id"] = compact_inline_text(message.tool_call_id, 120)
+            if message.tool_name:
+                record["tool_name"] = compact_inline_text(message.tool_name, 120)
+            if message.tool_result_for:
+                record["tool_result_for"] = compact_inline_text(message.tool_result_for, 120)
+            if message.metadata:
+                record["metadata"] = message.metadata
+            handle.write(json.dumps(record, ensure_ascii=False) + "\n")
     return path
 
 
@@ -414,6 +430,73 @@ def append_chat_turn(user_text: str, assistant_text: str, session_id: str | None
     return refresh_session_metadata(session.session_id, messages, user_text, assistant_text)
 
 
+def append_chat_message(
+    role: str,
+    content: str,
+    session_id: str | None = None,
+    *,
+    tool_call_id: str = "",
+    tool_name: str = "",
+    tool_result_for: str = "",
+    metadata: dict[str, object] | None = None,
+) -> ConversationSession:
+    session = get_session(session_id or read_active_session_id()) if session_id or read_active_session_id() else ensure_active_session()
+    if session is None:
+        session = create_conversation_session()
+    clean_role = str(role or "").strip()
+    if clean_role not in {"user", "assistant", "tool"}:
+        clean_role = "assistant"
+    messages = read_message_file(session_messages_path(session.session_id))
+    messages.append(
+        ChatHistoryMessage(
+            clean_role,
+            compact_history_text(content),
+            int(time.time()),
+            tool_call_id=compact_inline_text(tool_call_id, 120),
+            tool_name=compact_inline_text(tool_name, 120),
+            tool_result_for=compact_inline_text(tool_result_for, 120),
+            metadata=metadata or {},
+        )
+    )
+    messages = messages[-CONVERSATION_MAX_MESSAGES:]
+    write_message_file(session.session_id, messages)
+    user_text = content if clean_role == "user" else ""
+    assistant_text = content if clean_role != "user" else ""
+    return refresh_session_metadata(session.session_id, messages, user_text, assistant_text)
+
+
+def append_assistant_message(
+    assistant_text: str,
+    session_id: str | None = None,
+    *,
+    tool_call_id: str = "",
+    tool_name: str = "",
+) -> ConversationSession:
+    return append_chat_message(
+        "assistant",
+        assistant_text,
+        session_id,
+        tool_call_id=tool_call_id,
+        tool_name=tool_name,
+    )
+
+
+def append_tool_result_message(
+    tool_call_id: str,
+    tool_name: str,
+    content: str,
+    session_id: str | None = None,
+) -> ConversationSession:
+    return append_chat_message(
+        "tool",
+        content,
+        session_id,
+        tool_call_id=tool_call_id,
+        tool_name=tool_name,
+        tool_result_for=tool_call_id,
+    )
+
+
 def clear_chat_history(session_id: str | None = None) -> ConversationSession:
     session = get_session(session_id or read_active_session_id()) if session_id or read_active_session_id() else ensure_active_session()
     if session is None:
@@ -456,8 +539,18 @@ def build_conversation_memory_context(session_id: str, limit_turns: int) -> str:
     if messages:
         recent = []
         for message in messages:
-            role = "用户" if message.role == "user" else "导师"
-            recent.append(f"{role}: {compact_inline_text(message.content, 500)}")
+            if message.role == "user":
+                recent.append(f"用户: {compact_inline_text(message.content, 500)}")
+            elif message.role == "tool":
+                tool_label = message.tool_name or "tool"
+                call_label = f"#{message.tool_call_id}" if message.tool_call_id else ""
+                recent.append(f"工具结果[{tool_label}{call_label}]: {compact_inline_text(message.content, 700)}")
+            elif message.tool_call_id or message.tool_name:
+                tool_label = message.tool_name or "tool"
+                call_label = f"#{message.tool_call_id}" if message.tool_call_id else ""
+                recent.append(f"导师工具调用[{tool_label}{call_label}]: {compact_inline_text(message.content, 500)}")
+            else:
+                recent.append(f"导师: {compact_inline_text(message.content, 500)}")
         parts.append("最近会话:\n" + "\n".join(recent))
     if not parts:
         return ""

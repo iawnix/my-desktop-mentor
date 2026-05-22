@@ -476,7 +476,7 @@ class ChatDialog(QDialog):
         text = str(content or "").strip()
         if not text:
             return
-        role = "assistant" if role == "assistant" else "user"
+        role = role if role in {"assistant", "tool"} else "user"
         self.remove_empty_state()
 
         row = make_transparent(QWidget())

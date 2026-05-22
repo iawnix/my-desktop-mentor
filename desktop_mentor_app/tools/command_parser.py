@@ -17,6 +17,7 @@ CONTROL_COMMANDS = {
     "read",
     "run",
     "search",
+    "stat",
     "sys",
     "system",
     "touch",
@@ -26,6 +27,7 @@ CONTROL_COMMANDS = {
 HELP_TEXT = """电脑控制命令：
 /sys 或 /pwd：查看系统与工作目录
 /ls [路径]：列目录
+/stat <路径>：查看路径是否存在、类型、大小和权限位
 /read <路径>：读取文本文件预览
 /search <关键词> [路径]：搜索文本
 /open <路径或URL>：确认后打开文件、目录或链接

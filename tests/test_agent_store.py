@@ -8,6 +8,12 @@ from desktop_mentor_app.agent.context import assemble_agent_prompt
 from desktop_mentor_app.config.store import AgentConfig, agent_store_path
 from desktop_mentor_app.model_client.base import ModelResponse
 from desktop_mentor_app.pet.chat_manager import PetConversationService
+from desktop_mentor_app.state.conversations import (
+    append_tool_result_message,
+    build_conversation_memory_context,
+    create_conversation_session,
+    load_chat_history,
+)
 from desktop_mentor_app.state.agent_store import (
     MEMORY_STATUS_PENDING,
     TASK_STATUS_AWAITING_TOOL,
@@ -98,6 +104,17 @@ class AgentStoreTests(unittest.TestCase):
         self.assertIn("Agent 运行状态", prompt)
         self.assertIn("桌宠会话管理", prompt)
         self.assertEqual(plain, "下一步")
+
+    def test_tool_history_is_persisted_with_role_and_tool_metadata(self) -> None:
+        session = create_conversation_session("tool session")
+        append_tool_result_message("tool-1", "read_file", "README content", session_id=session.session_id)
+        messages = load_chat_history(session.session_id)
+        context = build_conversation_memory_context(session.session_id, 2)
+
+        self.assertEqual(messages[-1].role, "tool")
+        self.assertEqual(messages[-1].tool_call_id, "tool-1")
+        self.assertEqual(messages[-1].tool_name, "read_file")
+        self.assertIn("工具结果[read_file#tool-1]", context)
 
 
 class FakeModelClient:

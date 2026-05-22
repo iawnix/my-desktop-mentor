@@ -15,7 +15,10 @@ from ..model_client.agent import (
 )
 from ..model_client.base import ModelClient, ModelResponse, ToolCall
 from ..state.conversations import (
+    append_assistant_message,
+    append_chat_message,
     append_chat_turn,
+    append_tool_result_message,
     create_conversation_session,
     ensure_active_session,
     get_session,
@@ -130,6 +133,7 @@ class PetConversationService:
         *,
         memory_prompt: str,
         session_id: str,
+        record_as_tool: bool = False,
     ) -> ControlExecutionReply:
         task = start_task_run(
             session_id,
@@ -146,7 +150,7 @@ class PetConversationService:
             reply = result.display_text()
             append_tool_event(session_id, event="control_failed", plan=plan, result=result, task_id=task.task_id, summary=reply)
             update_task_run(task.task_id, status=TASK_STATUS_ERROR, assistant_text=reply, error=result.error)
-            self._append_chat_turn(memory_prompt, reply, session_id)
+            self._append_control_result_to_chat(memory_prompt, reply, session_id, plan, record_as_tool)
             return ControlExecutionReply(reply, session_id, ok=False, control_result=result)
         append_tool_event(session_id, event="control_executed", plan=plan, result=result, task_id=task.task_id)
         update_task_run(
@@ -155,7 +159,7 @@ class PetConversationService:
             assistant_text=reply,
             error=result.error,
         )
-        self._append_chat_turn(memory_prompt, reply, session_id)
+        self._append_control_result_to_chat(memory_prompt, reply, session_id, plan, record_as_tool)
         return ControlExecutionReply(reply, session_id, ok=result.ok, control_result=result)
 
     async def continue_agent_after_control_result(
@@ -197,6 +201,7 @@ class PetConversationService:
             use_conversation_context=state.use_conversation_context,
             task_id=task.task_id,
             messages=messages,
+            append_user_turn=False,
         )
 
     def record_control_plan_waiting(self, user_prompt: str, plan: ControlPlan, session_id: str) -> None:
@@ -247,6 +252,7 @@ class PetConversationService:
         use_conversation_context: bool,
         task_id: str,
         messages: list[dict[str, object]],
+        append_user_turn: bool = True,
     ) -> AgentReplyResult:
         if config.control_enabled:
             control_plan, assistant_text = self._extract_control_plan(response, config.control_workspace)
@@ -272,7 +278,21 @@ class PetConversationService:
                 )
                 update_task_run(task_id, status=TASK_STATUS_AWAITING_TOOL, assistant_text=display_text)
                 if display_text:
-                    self._append_chat_turn(prompt_text, display_text, session_id)
+                    if append_user_turn:
+                        self._append_chat_turn(
+                            prompt_text,
+                            display_text,
+                            session_id,
+                            tool_call_id=tool_call.id if tool_call is not None else "",
+                            tool_name=tool_call.name if tool_call is not None else "",
+                        )
+                    else:
+                        self._append_assistant_message(
+                            display_text,
+                            session_id,
+                            tool_call_id=tool_call.id if tool_call is not None else "",
+                            tool_name=tool_call.name if tool_call is not None else "",
+                        )
                 return AgentReplyResult(
                     display_text,
                     session_id,
@@ -284,7 +304,10 @@ class PetConversationService:
         if not reply_text:
             reply_text = self._fallback_reply(prompt_text)
 
-        self._append_chat_turn(prompt_text, reply_text, session_id)
+        if append_user_turn:
+            self._append_chat_turn(prompt_text, reply_text, session_id)
+        else:
+            self._append_assistant_message(reply_text, session_id)
         self._record_agent_memory_candidates(prompt_text, reply_text, session_id, task_id)
         if use_conversation_context and getattr(config, "long_term_memory_enabled", False):
             self._record_user_memory(prompt_text, reply_text, session_id)
@@ -299,11 +322,52 @@ class PetConversationService:
     def _fallback_reply(self, prompt: str) -> str:
         return local_agent_reply(str(prompt or ""))
 
-    def _append_chat_turn(self, prompt: str, reply: str, session_id: str) -> None:
+    def _append_chat_turn(
+        self,
+        prompt: str,
+        reply: str,
+        session_id: str,
+        *,
+        tool_call_id: str = "",
+        tool_name: str = "",
+    ) -> None:
         try:
-            append_chat_turn(prompt, reply, session_id)
+            if tool_call_id or tool_name:
+                append_chat_message("user", prompt, session_id)
+                append_assistant_message(reply, session_id, tool_call_id=tool_call_id, tool_name=tool_name)
+            else:
+                append_chat_turn(prompt, reply, session_id)
         except Exception:
             LOGGER.exception("failed to append chat turn")
+
+    def _append_assistant_message(
+        self,
+        reply: str,
+        session_id: str,
+        *,
+        tool_call_id: str = "",
+        tool_name: str = "",
+    ) -> None:
+        try:
+            append_assistant_message(reply, session_id, tool_call_id=tool_call_id, tool_name=tool_name)
+        except Exception:
+            LOGGER.exception("failed to append assistant message")
+
+    def _append_control_result_to_chat(
+        self,
+        prompt: str,
+        reply: str,
+        session_id: str,
+        plan: ControlPlan,
+        record_as_tool: bool,
+    ) -> None:
+        try:
+            if record_as_tool:
+                append_tool_result_message(plan.plan_id, plan.action, reply, session_id)
+            else:
+                append_chat_turn(prompt, reply, session_id)
+        except Exception:
+            LOGGER.exception("failed to append control result")
 
     def _append_legacy_memory(self, prompt: str, reply: str) -> None:
         try:

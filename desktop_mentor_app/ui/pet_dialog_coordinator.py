@@ -398,10 +398,11 @@ class PetDialogCoordinator:
             plan,
             memory_prompt=memory_prompt,
             session_id=session_id,
+            record_as_tool=auto_continue,
         )
-        if result.ok or auto_continue:
+        if result.ok and not auto_continue:
             pet.agent_signals.reply_ready.emit(result.text, result.session_id)
-        else:
+        elif not auto_continue:
             pet.agent_signals.error_ready.emit(result.text, result.session_id)
             return
         if auto_continue and result.control_result is not None:
@@ -504,9 +505,31 @@ class PetDialogCoordinator:
             pet.agent_signals.error_ready.emit("电脑操作计划格式无效。", session_id)
             return
         if assistant_text:
-            pet.show_agent_reply(assistant_text, session_id)
+            pet.show_bubble("准备调用本地工具。", duration=min(1.8, pet.message_duration()), action=STICKER_ACTION_THINKING)
         elif pet.chat_dialog is not None and pet.chat_dialog.waiting_for_reply:
             pet.chat_dialog.set_waiting(False)
+        if not plan.requires_confirmation and not plan.is_blocked:
+            if pet.chat_dialog is None:
+                self.open_chat()
+            if pet.chat_dialog is not None:
+                session = get_session(session_id) or ensure_active_session()
+                pet.chat_dialog.set_sessions(list_conversation_sessions(), session.session_id)
+                if pet.chat_dialog.active_session_id != session.session_id:
+                    pet.chat_dialog.set_active_session(session, load_chat_history(session.session_id))
+                else:
+                    pet.chat_dialog.set_active_session(session)
+                pet.chat_dialog.add_control_plan(plan.plan_id, plan.title, plan.summary(), False)
+                pet.chat_dialog.set_waiting(True)
+            pet.show_bubble("执行本地只读工具。", duration=min(1.8, pet.message_duration()), action=STICKER_ACTION_THINKING)
+            pet.play_action(STICKER_ACTION_THINKING, loop=True)
+            self.queue_control_reply(
+                plan,
+                prompt_text or source_text or plan.source_text,
+                session_id,
+                use_conversation_context,
+                True,
+            )
+            return
         if pet.chat_dialog is None:
             self.open_chat()
         if pet.chat_dialog is not None:

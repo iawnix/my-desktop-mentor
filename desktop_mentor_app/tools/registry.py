@@ -3,7 +3,6 @@ from __future__ import annotations
 
 import json
 import shlex
-from dataclasses import replace
 
 from ..model_client.base import ModelResponse, ToolCall
 from ..security.policy import can_read_path, can_run_command, can_write_path, control_workspace, resolve_user_path
@@ -46,6 +45,24 @@ def build_control_tool_schemas() -> list[dict[str, object]]:
                             "description": "要列出的目录路径；省略时使用控制工作目录。",
                         }
                     },
+                    "additionalProperties": False,
+                },
+            },
+        },
+        {
+            "type": "function",
+            "function": {
+                "name": "path_info",
+                "description": "查看路径是否存在、类型、大小和是否可执行，不读取文件内容。",
+                "parameters": {
+                    "type": "object",
+                    "properties": {
+                        "path": {
+                            "type": "string",
+                            "description": "要检查的文件或目录路径。",
+                        }
+                    },
+                    "required": ["path"],
                     "additionalProperties": False,
                 },
             },
@@ -303,6 +320,24 @@ def build_control_plan_from_tool_call(tool_call: ToolCall, raw_workspace: str = 
             permission,
         )
 
+    if tool_name == "path_info":
+        target_text = _tool_string_arg(args, "path")
+        if not target_text:
+            return blocked_plan(source_text, "路径检查被阻止", "缺少路径。", ["请提供 path。"])
+        target = resolve_user_path(target_text, workspace)
+        permission, reason = can_read_path(target)
+        if permission == PermissionLevel.BLOCKED:
+            return blocked_plan(source_text, "路径检查被阻止", reason, [f"目标：{target}"])
+        return ControlPlan(
+            plan_id,
+            source_text,
+            "path_info",
+            "检查路径信息",
+            [f"检查路径：{target}"],
+            {"path": str(target)},
+            permission,
+        )
+
     if tool_name == "read_file":
         target_text = _tool_string_arg(args, "path")
         if not target_text:
@@ -443,8 +478,6 @@ def build_control_plan_from_model_response(response: ModelResponse, raw_workspac
     if not tool_calls:
         return None, str(response.content or "").strip()
     plan = build_control_plan_from_tool_call(tool_calls[0], raw_workspace)
-    if plan.permission == PermissionLevel.READ_ONLY:
-        plan = replace(plan, permission=PermissionLevel.USER_APPROVAL)
     return plan, str(response.content or "").strip()
 
 
@@ -471,6 +504,14 @@ def build_control_plan(user_text: str, raw_workspace: str = "") -> ControlPlan |
         if permission == PermissionLevel.BLOCKED:
             return blocked_plan(text, "列目录被阻止", reason, [f"目标：{target}"])
         return ControlPlan(plan_id, text, "list_dir", "列出目录", [f"读取目录：{target}"], {"path": str(target)}, permission)
+    if command == "stat":
+        if not tokens:
+            return blocked_plan(text, "路径检查被阻止", "缺少路径。")
+        target = resolve_user_path(tokens[0], workspace)
+        permission, reason = can_read_path(target)
+        if permission == PermissionLevel.BLOCKED:
+            return blocked_plan(text, "路径检查被阻止", reason, [f"目标：{target}"])
+        return ControlPlan(plan_id, text, "path_info", "检查路径信息", [f"检查路径：{target}"], {"path": str(target)}, permission)
     if command == "read":
         if not tokens:
             return blocked_plan(text, "读取文件被阻止", "缺少文件路径。")

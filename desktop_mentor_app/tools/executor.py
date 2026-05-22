@@ -61,6 +61,31 @@ def execute_list_dir(plan: ControlPlan) -> ControlResult:
     return result(plan, True, "\n".join(lines))
 
 
+def execute_path_info(plan: ControlPlan) -> ControlResult:
+    path = Path(str(plan.args.get("path", ""))).expanduser()
+    exists = path.exists()
+    lines = [
+        f"path: {path}",
+        f"exists: {exists}",
+    ]
+    if exists:
+        try:
+            stat = path.stat()
+            lines.extend(
+                [
+                    f"type: {'directory' if path.is_dir() else 'file' if path.is_file() else 'other'}",
+                    f"size: {stat.st_size}",
+                    f"mode: {oct(stat.st_mode & 0o777)}",
+                    f"executable: {os.access(path, os.X_OK)}",
+                    f"readable: {os.access(path, os.R_OK)}",
+                    f"writable: {os.access(path, os.W_OK)}",
+                ]
+            )
+        except OSError as exc:
+            return result(plan, False, "\n".join(lines), error=f"{type(exc).__name__}: {exc}")
+    return result(plan, True, "\n".join(lines))
+
+
 def execute_read_file(plan: ControlPlan) -> ControlResult:
     path = Path(str(plan.args.get("path", ""))).expanduser()
     if not path.exists():
@@ -128,8 +153,8 @@ def execute_system_info(plan: ControlPlan) -> ControlResult:
         f"system: {platform.system()} {platform.release()}",
         f"python: {sys.version.split()[0]}",
         f"home: {Path.home()}",
-        f"workspace: {workspace}",
-        f"cwd: {Path.cwd()}",
+        f"tool_workspace: {workspace}",
+        "note: tool_workspace 是模型工具默认工作目录；不要把应用安装目录当作任务文件落点。",
     ]
     return result(plan, True, "\n".join(lines))
 
@@ -235,6 +260,8 @@ def execute_control_plan(plan: ControlPlan) -> ControlResult:
         return execute_system_info(plan)
     if plan.action == "list_dir":
         return execute_list_dir(plan)
+    if plan.action == "path_info":
+        return execute_path_info(plan)
     if plan.action == "read_file":
         return execute_read_file(plan)
     if plan.action == "search_text":

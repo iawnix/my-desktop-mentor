@@ -131,10 +131,10 @@ def create_markdown_message_view(markdown: str) -> QWidget:
 class ChatMessageCard(QFrame):
     def __init__(self, role: str, text: str, parent: QWidget | None = None) -> None:
         super().__init__(parent)
-        self.role = "assistant" if role == "assistant" else "user"
+        self.role = role if role in {"assistant", "tool"} else "user"
         self.full_text = str(text or "")
-        self.setObjectName("chatMessageCardAssistant" if self.role == "assistant" else "chatMessageCardUser")
-        self.setMaximumWidth(880 if self.role == "assistant" else 700)
+        self.setObjectName("chatMessageCardAssistant" if self.role != "user" else "chatMessageCardUser")
+        self.setMaximumWidth(880 if self.role != "user" else 700)
         self.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Maximum)
         layout = QVBoxLayout(self)
         layout.setContentsMargins(14, 12, 14, 12)
@@ -143,17 +143,17 @@ class ChatMessageCard(QFrame):
         header = QHBoxLayout()
         header.setContentsMargins(0, 0, 0, 0)
         header.setSpacing(8)
-        role_label = styled_label("导师" if self.role == "assistant" else "你", "chatRole")
+        role_label = styled_label("导师" if self.role == "assistant" else "工具" if self.role == "tool" else "你", "chatRole")
         header.addWidget(role_label, 0)
         header.addStretch(1)
         layout.addLayout(header)
 
-        if self.role == "assistant":
+        if self.role != "user":
             layout.addWidget(create_markdown_message_view(self.full_text), 1)
             if self.has_full_reply_detail():
-                detail_button = QPushButton("完整回复")
+                detail_button = QPushButton("完整工具输出" if self.role == "tool" else "完整回复")
                 mark_button(detail_button, "quietButton")
-                detail_button.setToolTip("在独立窗口中查看完整回复。")
+                detail_button.setToolTip("在独立窗口中查看完整内容。")
                 detail_button.clicked.connect(self.open_full_reply)
                 footer = QHBoxLayout()
                 footer.setContentsMargins(0, 0, 0, 0)
@@ -170,5 +170,5 @@ class ChatMessageCard(QFrame):
         return len(self.full_text) >= FULL_REPLY_THRESHOLD or self.full_text.count("\n") >= 18
 
     def open_full_reply(self) -> None:
-        dialog = TextViewDialog("完整回复", self.full_text, self.window())
+        dialog = TextViewDialog("完整工具输出" if self.role == "tool" else "完整回复", self.full_text, self.window())
         dialog.exec()
